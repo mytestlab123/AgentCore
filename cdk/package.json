@@ -1,0 +1,32 @@
+{
+  "name": "agentcore-issue4-mvp-cdk",
+  "version": "1.0.0",
+  "description": "Minimal API Gateway, Lambda, DynamoDB, and Bedrock POC",
+  "main": "app.ts",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "synth": "cdk synth AgentCoreMvp",
+    "cdk": "cdk"
+  },
+  "keywords": [
+    "aws",
+    "cdk",
+    "bedrock",
+    "lambda",
+    "dynamodb"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.19.20",
+    "aws-cdk": "2.1138.0",
+    "source-map-support": "^0.5.21",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "^2.241.0",
+    "constructs": "^10.4.2"
+  }
+}

@@ -2,6 +2,9 @@
 
 Related issue: #1
 
+> Current implementation boundary: GitHub Issue #4. This document is retained
+> as future architecture context; it does not define the current MVP scope.
+
 ## Goal
 
 Build a polished internal AI developer-platform POC that demonstrates one developer-facing platform interface for governed access to AI models and agent capabilities.
