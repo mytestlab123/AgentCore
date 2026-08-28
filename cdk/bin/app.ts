@@ -17,6 +17,7 @@ const tags: Record<string, string> = {
   TTL: ttl,
   purpose: 'Three-view governed Bedrock access POC',
   phase: 'issue-4-mvp',
+  cleanup: 'delete',
 };
 
 for (const [key, value] of Object.entries(tags)) {

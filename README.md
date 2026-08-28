@@ -150,4 +150,5 @@ the generated live frontend config.
 - Destroy the stack at the end of the demo or before its TTL.
 
 See [Issue #4 reuse decision](docs/ISSUE_4_REUSE_DECISION.md) and the broader
-[future architecture](docs/POC_ARCHITECTURE.md).
+[future architecture](docs/POC_ARCHITECTURE.md). AWS lifecycle actions are
+tracked in [the resource record](docs/aws-resource-record.csv).
