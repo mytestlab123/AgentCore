@@ -12,19 +12,29 @@ user_name=agentcore-issue9-bedrock-api-key-user-r1
 policy_name=AgentCoreIssue9BedrockApiKeyPolicy
 allowed_model=apac.amazon.nova-lite-v1:0
 restricted_model=apac.amazon.nova-pro-v1:0
-credential_age_days=1
-ttl=${ISSUE9_TTL:-$(date -d '+1 day' '+%d-%m-%y')}
+retain_demo=${ISSUE9_RETAIN_DEMO:-false}
+if [[ $retain_demo == true ]]; then
+  credential_age_days=${ISSUE9_CREDENTIAL_AGE_DAYS:-}
+  ttl=${ISSUE9_TTL:-}
+  cleanup_tag=review
+else
+  credential_age_days=${ISSUE9_CREDENTIAL_AGE_DAYS:-1}
+  ttl=${ISSUE9_TTL:-$(date -d '+1 day' '+%d-%m-%y')}
+  cleanup_tag=delete
+fi
 run_id=$(date '+%Y%m%dT%H%M%S%z')
 evidence_dir=${EVIDENCE_DIR:-$HOME/.AGENTS-temp/AgentCore/bedrock-api-key/$run_id}
 private_dir=$evidence_dir/private
+retained_dir=${ISSUE9_RETAIN_DIR:-$HOME/.AGENTS-temp/AgentCore/issue9-retained}
+retained_credential_file=$retained_dir/credential.json
 
 usage() {
   cat <<'USAGE'
 Usage: bedrock-api-key-poc.sh [--plan|--approve-run]
 
 --plan         Print the fixed proof scope. Makes no AWS calls.
---approve-run  Create one one-day Bedrock API key, prove ALLOW and DENY,
-               collect CloudTrail evidence, then delete the key and IAM user.
+--approve-run  Create one configured Bedrock API key, prove ALLOW and DENY,
+               collect CloudTrail evidence, then apply the selected lifecycle.
 
 Required for --approve-run:
   AWS_PROFILE
@@ -40,11 +50,11 @@ Profile alias: $profile
 Region: $region
 IAM user: $user_name
 Key type: long-term service-specific credential
-Key expiry: $credential_age_days day
+Key expiry: ${credential_age_days:-not-set} day(s)
 Resource TTL: $ttl
 Allowed model: $allowed_model
 Restricted model: $restricted_model
-Cleanup: always delete the credential, inline policy, and IAM user
+Lifecycle: $(if [[ $retain_demo == true ]]; then printf 'retain successful demo; clean failed runs'; else printf 'always delete'; fi)
 Estimated AWS cost: below USD 0.01 for one tiny successful inference
 PLAN
 }
@@ -69,12 +79,20 @@ if [[ -z $expected_account || -z $expected_caller_arn ]]; then
   echo 'NO-GO: set EXPECTED_AWS_ACCOUNT and EXPECTED_AWS_CALLER_ARN.' >&2
   exit 2
 fi
+if [[ $retain_demo != true && $retain_demo != false ]]; then
+  echo 'NO-GO: ISSUE9_RETAIN_DEMO must be true or false.' >&2
+  exit 2
+fi
+if [[ ! $credential_age_days =~ ^[0-9]+$ ]] || ((credential_age_days < 1 || credential_age_days > 36600)); then
+  echo 'NO-GO: ISSUE9_CREDENTIAL_AGE_DAYS must be between 1 and 36600.' >&2
+  exit 2
+fi
 if [[ ! $ttl =~ ^[0-9]{2}-[0-9]{2}-[0-9]{2}$ ]]; then
   echo 'NO-GO: ISSUE9_TTL must use DD-MM-YY.' >&2
   exit 2
 fi
 
-for command_name in aws curl date head install jq rg sed seq sleep; do
+for command_name in aws curl cut date head install jq rg sed seq sha256sum sleep; do
   command -v "$command_name" >/dev/null 2>&1 || {
     echo "ERROR: missing command: $command_name" >&2
     exit 1
@@ -93,6 +111,7 @@ policy_created=false
 credential_created=false
 cleanup_attempted=false
 cleanup_failed=false
+run_succeeded=false
 
 cleanup_resources() {
   local credential_absent=false managed_policy_arn user_absent=false
@@ -109,7 +128,6 @@ cleanup_resources() {
       >"$evidence_dir/cleanup.json"
     return
   fi
-
   if [[ $credential_created == true ]]; then
     if aws iam delete-service-specific-credential \
       --profile "$profile" \
@@ -180,6 +198,10 @@ cleanup_resources() {
     cleanup_failed=true
   fi
 
+  if [[ $retain_demo == true && $credential_absent == true && $user_absent == true && $cleanup_failed == false ]]; then
+    rm -f "$retained_credential_file"
+  fi
+
   jq -n \
     --argjson credentialDeleted "$credential_absent" \
     --argjson userDeleted "$user_absent" \
@@ -191,7 +213,11 @@ cleanup_resources() {
 on_exit() {
   local exit_code=$?
   trap - EXIT INT TERM
-  cleanup_resources
+  if [[ $retain_demo == true && $run_succeeded == true ]]; then
+    rm -f "$auth_header_file" "$credential_file"
+  else
+    cleanup_resources
+  fi
   if [[ $cleanup_failed == true ]]; then
     echo "ERROR: cleanup incomplete; inspect $evidence_dir" >&2
     exit 1
@@ -214,6 +240,10 @@ fi
 if aws iam get-user --profile "$profile" --user-name "$user_name" \
   >"$private_dir/preexisting-user.json" 2>"$private_dir/preexisting-user.stderr"; then
   echo "NO-GO: dedicated IAM user already exists: $user_name" >&2
+  exit 2
+fi
+if [[ $retain_demo == true && -e $retained_credential_file ]]; then
+  echo 'NO-GO: a protected retained credential file already exists.' >&2
   exit 2
 fi
 
@@ -281,7 +311,7 @@ aws iam create-user \
     Key=TTL,Value="$ttl" \
     Key=purpose,Value=native-bedrock-api-key-poc \
     Key=phase,Value=issue-9 \
-    Key=cleanup,Value=delete \
+    Key=cleanup,Value="$cleanup_tag" \
   >"$private_dir/create-user.json"
 user_created=true
 user_was_created=true
@@ -319,8 +349,14 @@ aws iam create-service-specific-credential \
 credential_created=true
 credential_id=$(jq -er '.ServiceSpecificCredential.ServiceSpecificCredentialId' "$credential_file")
 api_key=$(jq -er '.ServiceSpecificCredential.ServiceApiKeyValue // .ServiceSpecificCredential.ServiceCredentialSecret' "$credential_file")
-jq '{keyType:"long-term",credentialAgeDays:1,created:.ServiceSpecificCredential.CreateDate,expires:.ServiceSpecificCredential.ExpirationDate,status:.ServiceSpecificCredential.Status}' \
+key_fingerprint=$(printf '%s' "$api_key" | sha256sum | cut -d' ' -f1)
+jq --arg fingerprint "${key_fingerprint:0:12}" --argjson ageDays "$credential_age_days" \
+  '{keyType:"long-term",credentialAgeDays:$ageDays,created:.ServiceSpecificCredential.CreateDate,expires:.ServiceSpecificCredential.ExpirationDate,status:.ServiceSpecificCredential.Status,keyFingerprint:$fingerprint}' \
   "$credential_file" >"$evidence_dir/key-metadata.json"
+if [[ $retain_demo == true ]]; then
+  install -d -m 700 "$retained_dir"
+  install -m 600 "$credential_file" "$retained_credential_file"
+fi
 printf 'Authorization: Bearer %s\n' "$api_key" >"$auth_header_file"
 unset api_key
 rm -f "$credential_file"
@@ -390,7 +426,8 @@ denied_status=$(curl --silent --show-error --max-time 45 \
   --write-out '%{http_code}' \
   "$endpoint/model/$restricted_model/converse")
 if [[ $denied_status != 403 ]] ||
-  ! rg -q 'AccessDenied|not authorized' "$private_dir/denied-response.json"; then
+  { ! rg -q 'AccessDenied|not authorized' "$private_dir/denied-response.json" &&
+    ! rg -qi '^x-amzn-errortype:[[:space:]]*AccessDeniedException' "$private_dir/denied.headers"; }; then
   echo "ERROR: restricted model was not denied by AWS; status=$denied_status" >&2
   exit 1
 fi
@@ -403,10 +440,16 @@ jq -n \
   '{result:"DENY",enforcedBy:"AWS IAM",model:$model,httpStatus:($httpStatus|tonumber),requestId:$requestId}' \
   >"$evidence_dir/deny.json"
 
-cleanup_resources
-if [[ $cleanup_failed == true ]]; then
-  echo "ERROR: cleanup failed; inspect $evidence_dir" >&2
-  exit 1
+if [[ $retain_demo == false ]]; then
+  cleanup_resources
+  if [[ $cleanup_failed == true ]]; then
+    echo "ERROR: cleanup failed; inspect $evidence_dir" >&2
+    exit 1
+  fi
+else
+  jq -n \
+    '{credentialDeleted:false,userDeleted:false,cleanupFailed:false,intentionallyRetained:true}' \
+    >"$evidence_dir/cleanup.json"
 fi
 
 audit_ready=false
@@ -458,6 +501,8 @@ jq -n \
   --arg allowedModel "$allowed_model" \
   --arg restrictedModel "$restricted_model" \
   --arg TTL "$ttl" \
+  --argjson credentialAgeDays "$credential_age_days" \
+  --argjson intentionallyRetained "$retain_demo" \
   --argjson successEvents "$success_events" \
   --argjson deniedEvents "$denied_events" \
   '{
@@ -466,7 +511,7 @@ jq -n \
     profileAlias:$profile,
     region:$region,
     keyType:"long-term Bedrock service-specific credential",
-    credentialAgeDays:1,
+    credentialAgeDays:$credentialAgeDays,
     iamUser:$user,
     generalAwsAccessKeysCreated:false,
     consoleLoginCreated:false,
@@ -476,8 +521,14 @@ jq -n \
     deniedByAwsIam:true,
     cloudTrail:{successEvents:$successEvents,deniedEvents:$deniedEvents,bearerTokenSuccessMarked:true},
     TTL:$TTL,
-    cleanup:"verified-delete"
+    intentionallyRetained:$intentionallyRetained,
+    cleanup:(if $intentionallyRetained then "retained-review" else "verified-delete" end)
   }' >"$evidence_dir/result.json"
 
-printf 'PASS: native Bedrock API key ALLOW, DENY, audit, and cleanup verified.\n'
+run_succeeded=true
+if [[ $retain_demo == true ]]; then
+  printf 'PASS: native Bedrock API key ALLOW, DENY, audit, and retention verified.\n'
+else
+  printf 'PASS: native Bedrock API key ALLOW, DENY, audit, and cleanup verified.\n'
+fi
 printf 'Evidence: %s\n' "$evidence_dir"

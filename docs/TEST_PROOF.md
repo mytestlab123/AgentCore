@@ -1,56 +1,41 @@
 # AgentCore Test Proof
 
-Last verified: 31 August 2026, 21:49 SGT
+Last verified: 1 September 2026, 00:09 SGT
 
 ## Bottom line
 
-The existing Issue #4 dark-mode local portal passed its Playwright Core browser
-regression test at `http://localhost:5174/`. Issue #9 did not change the GUI;
-its native Bedrock API-key flow was tested separately against AWS.
-
-## Screenshot review
-
-The supplied Project-page screenshot is consistent with the intended local
-demo:
-
-- dark mode is applied across the full portal;
-- the visible scope is correctly labelled `ISSUE #4 MVP`;
-- `Local POC`, `No AWS calls`, `LOCAL MOCK`, and `Clearly marked local
-  simulation` make the environment boundary visible;
-- Project, Playground, and Logs are the only navigation views;
-- Nova Lite is shown as allowed and Premium model as not allowed.
-
-The screenshot was taken while the simulated platform key was visible. This is
-not a native Bedrock API key. The automated browser test presses `Mask key` and
-verifies that the full simulated value is no longer displayed.
+Issue #9 passed the dark-mode GUI journey at `http://127.0.0.1:5174/` using
+Playwright Core and installed Windows Chrome. The browser reused the retained
+30-day Bedrock credential and showed real Nova Lite ALLOW 200, Nova Pro IAM
+DENY 403, and two sanitized CloudTrail events. No AWS secret entered the
+browser.
 
 ## Playwright Core browser proof
 
 Command:
 
 ```bash
-APP_URL=http://localhost:5174/ ./scripts/browser-e2e.sh
+APP_URL=http://127.0.0.1:5174/ \
+  EXPECTED_API_BASE_URL=http://127.0.0.1:9019 \
+  ./scripts/browser-e2e.sh
 ```
-
-Tested version: `playwright-core 1.62.1`, connected to installed Windows Chrome
-through the Chrome DevTools Protocol.
 
 Result: **PASS**
 
 | Browser contract | Evidence |
 | --- | --- |
 | Project, Playground, and Logs load | 3 routes checked |
-| Demo key lifecycle | key created and then masked |
-| Approved catalogue entry | Amazon Nova Lite shown as Allowed |
-| Restricted catalogue entry | Premium model shown as Denied |
-| Audit view | Allowed and Denied decisions shown together |
-| Local-only boundary | 0 external requests |
-| Browser quality | 0 console or page errors |
+| Retained key is safe in GUI | SHA-256 fingerprint only; AWS secret absent |
+| Approved model | Amazon Nova Lite, ALLOW HTTP 200, real response visible |
+| Restricted model | Amazon Nova Pro, DENY HTTP 403, AWS IAM visible |
+| Audit view | Success and AccessDenied CloudTrail rows together |
+| Browser network boundary | 0 external requests; only loopback GUI/API |
+| Browser quality | 0 unexpected console or page errors |
 | Browser cleanup | Chrome stopped, temporary profile removed, debug port released |
 
 Evidence directory:
 
-`/home/user/.AGENTS-temp/AgentCore/browser-e2e/20260831T214913+0800/`
+`/home/user/.AGENTS-temp/AgentCore/browser-e2e/20260901T000923+0800/`
 
 Key files:
 
@@ -58,6 +43,7 @@ Key files:
 - `cleanup.json`
 - `routes.json`
 - `network.json`
+- `unexpected-console-errors.json`
 - `playground-allowed.png`
 - `playground-denied.png`
 - `logs-allowed-denied.png`
@@ -71,14 +57,12 @@ Windows review copies:
 
 ## Issue #9 AWS proof
 
-Issue #9 introduced a CLI-only flow, not a new browser flow:
-
 ```text
-temporary Bedrock-specific key
+retained Bedrock-specific key
   -> Nova Lite             ALLOW / HTTP 200
   -> Nova Pro              DENY / HTTP 403 from AWS IAM
+  -> lifecycle             30 days / TTL=30-09-26 / cleanup=review
   -> CloudTrail            success plus AccessDenied events
-  -> targeted cleanup      credential and IAM user deleted
 ```
 
 AWS environment used:
@@ -86,27 +70,38 @@ AWS environment used:
 - profile alias: `amit`;
 - Region: `ap-southeast-1`;
 - `project1` profile: not used;
-- credential: one-day long-term Bedrock service-specific credential;
+- credential: 30-day long-term Bedrock service-specific credential;
 - normal AWS access key issued to client: no;
 - console login issued: no;
-- retained Issue #9 AWS resources: none.
+- retained Issue #9 resources: one dedicated IAM user and one model-restricted
+  service-specific credential;
+- cleanup: explicit repo-owned cleanup script; not run after successful proof.
 
 Public-safe AWS evidence:
 [issue-9-live-proof.json](evidence/issue-9-live-proof.json)
 
-Private local evidence:
-`/home/user/.AGENTS-temp/AgentCore/bedrock-api-key/20260831T212021+0800/`
+Private local AWS evidence:
+`/home/user/.AGENTS-temp/AgentCore/issue9-gui/20260831T233242+0800/`
+
+## CloudTrail propagation behavior
+
+CloudTrail event history is asynchronous. The GUI reports the core proof PASS
+as soon as HTTP 200 ALLOW, HTTP 403 IAM DENY, and credential lifecycle are
+verified. Audit is shown separately as PENDING or VERIFIED. The latest browser
+run saw VERIFIED with both events.
 
 ## Proof boundary
 
 | Claim | Proof source | Status |
 | --- | --- | --- |
-| Existing local GUI works in dark mode | Playwright Core and screenshots | TEST-PROVEN |
-| Local GUI performs no external requests | Playwright network capture | TEST-PROVEN |
-| Native Bedrock key invokes Nova Lite | HTTP client response and CloudTrail | AWS-PROVEN |
-| AWS IAM denies Nova Pro | HTTP 403 and CloudTrail AccessDenied | AWS-PROVEN |
-| Temporary Issue #9 resources were deleted | IAM cleanup result and post-check | AWS-PROVEN |
-| Issue #9 has a new GUI flow | No GUI was added by design | NOT IMPLEMENTED |
+| Issue #9 dark-mode GUI works | Playwright Core and screenshots | TEST-PROVEN |
+| Browser receives no AWS secret | Sanitized API contract and browser assertions | TEST-PROVEN |
+| Browser makes no external request | Playwright network capture | TEST-PROVEN |
+| Native Bedrock key invokes Nova Lite | HTTP 200 client record and CloudTrail | AWS-PROVEN |
+| AWS IAM denies Nova Pro | HTTP 403 client record and CloudTrail AccessDenied | AWS-PROVEN |
+| Successful setup is retained safely | AWS lifecycle evidence and protected mode-600 file | AWS-PROVEN |
+| Claude model selection and Claude Code usage | Separate future issue | NOT IMPLEMENTED |
 
-Browser screenshots do not prove AWS execution. The AWS client, IAM denial,
-CloudTrail events, and cleanup evidence are required for the Issue #9 claims.
+Screenshots support the GUI claim but do not independently prove AWS
+execution. The correlated HTTP results, sanitized CloudTrail events, lifecycle
+record, and protected local evidence are required for the AWS claims.

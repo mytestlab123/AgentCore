@@ -46,10 +46,11 @@ CDK TypeScript build, npm audits, and whitespace checks. It makes no AWS calls.
 ## Native Bedrock API key proof
 
 [Issue #9](https://github.com/mytestlab123/AgentCore/issues/9) adds a separate,
-CLI-only proof of governed developer access using an AWS-native Bedrock API
-key. It creates a one-day Bedrock service-specific credential on a disposable
-IAM user, proves Nova Lite ALLOW and Nova Pro DENY through AWS IAM, captures
-CloudTrail evidence, and then deletes both the credential and user.
+GUI-backed proof of governed developer access using an AWS-native Bedrock API
+key. It creates a 30-day Bedrock service-specific credential on a dedicated
+IAM user, proves Nova Lite ALLOW and Nova Pro DENY through AWS IAM, and shows
+sanitized CloudTrail evidence. The successful low-cost setup is retained for
+repeat demos with `TTL=30-09-26` and `cleanup=review`; failed runs clean up.
 
 Review the fixed scope without making an AWS call:
 
@@ -57,27 +58,40 @@ Review the fixed scope without making an AWS call:
 AWS_PROFILE=amit ./scripts/bedrock-api-key-poc.sh --plan
 ```
 
-The live mode is deliberately account- and caller-gated:
+The live GUI is deliberately account- and caller-gated and loopback-only:
 
 ```bash
 export EXPECTED_AWS_ACCOUNT='<exact-target-account-id>'
 export EXPECTED_AWS_CALLER_ARN='<exact-target-caller-arn>'
-AWS_PROFILE=amit ./scripts/bedrock-api-key-poc.sh --approve-run
+AWS_PROFILE=amit AWS_REGION=ap-southeast-1 \
+  ISSUE9_CREDENTIAL_AGE_DAYS=30 ISSUE9_TTL=30-09-26 \
+  ./dev-issue9.sh --approve-live
 ```
 
-The secret is held only in a mode-700 local evidence directory, is not placed
-in command arguments, and is removed before the script exits. See the
+Open `http://127.0.0.1:5174/` and use **Generate key and run proof**. The full
+secret remains server-side in a mode-600 ignored file; the browser receives
+only a SHA-256 fingerprint. CloudTrail propagation is asynchronous and does
+not block the core HTTP 200/403/lifecycle proof. See the
 [Issue #9 proof and developer guide](docs/ISSUE_9_BEDROCK_API_KEYS.md).
+
+Explicit cleanup is separate and is not part of the repeat-demo path:
+
+```bash
+AWS_PROFILE=amit AWS_REGION=ap-southeast-1 \
+  ./scripts/cleanup-issue9-retained.sh --approve-cleanup
+```
 
 With the local portal running, use its exact URL:
 
 ```bash
-APP_URL=http://localhost:5174/ ./scripts/browser-e2e.sh
+APP_URL=http://127.0.0.1:5174/ \
+  EXPECTED_API_BASE_URL=http://127.0.0.1:9019 \
+  ./scripts/browser-e2e.sh
 ```
 
 The browser runner uses `playwright-core` with installed Windows Chrome. It
-proves the three views, key create/mask behavior, allowed response, denied
-policy, combined logs, local-only networking, and exact browser cleanup.
+proves the three views, masked key, real HTTP 200 response, real IAM HTTP 403
+denial, audit state, local-only browser networking, and exact browser cleanup.
 Evidence is written under `~/.AGENTS-temp/AgentCore/browser-e2e/`.
 
 ## Minimal AWS architecture

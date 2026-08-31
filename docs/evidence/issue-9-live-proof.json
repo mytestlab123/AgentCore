@@ -1,11 +1,14 @@
 {
   "proof": "native Amazon Bedrock API key governance",
   "status": "PASS",
-  "capturedAt": "2026-08-31T21:23:24+08:00",
+  "capturedAt": "2026-08-31T23:35:21+08:00",
   "region": "ap-southeast-1",
   "credential": {
     "type": "long-term Bedrock service-specific credential",
-    "ageDays": 1,
+    "ageDays": 30,
+    "TTL": "30-09-26",
+    "cleanup": "review",
+    "intentionallyRetained": true,
     "generalAwsAccessKeysCreated": false,
     "consoleLoginCreated": false
   },
@@ -16,42 +19,44 @@
       "httpStatus": 200,
       "inputTokens": 7,
       "outputTokens": 6,
-      "requestIdSha256": "8551c0366f81730c5b19b1708059046eccb12660580920dcaad730bf60039031"
+      "requestIdSha256": "1b06fbaac089af91e8d62fba7f0fcced3ef32c30155c43c2897e754690340928"
     },
     {
       "decision": "DENY",
       "enforcedBy": "AWS IAM",
       "model": "apac.amazon.nova-pro-v1:0",
       "httpStatus": 403,
-      "requestIdSha256": "5fd117119d4391dfaa57c29b6f02030e7fc15860f0602e93cfdaefb3dd0894fb"
+      "requestIdSha256": "e05188dfab9f6398dcb45afedb07464b3ec77f388929caf329d08c36d5905d68"
     }
   ],
   "cloudTrail": [
     {
-      "eventTime": "2026-08-31T13:20:43Z",
+      "eventTime": "2026-08-31T15:33:07Z",
       "eventSource": "bedrock.amazonaws.com",
       "eventName": "Converse",
       "errorCode": "AccessDenied",
       "modelId": null,
       "bearerToken": null,
       "actorType": "IAMUser",
-      "requestIdSha256": "5fd117119d4391dfaa57c29b6f02030e7fc15860f0602e93cfdaefb3dd0894fb"
+      "requestIdSha256": "e05188dfab9f6398dcb45afedb07464b3ec77f388929caf329d08c36d5905d68"
     },
     {
-      "eventTime": "2026-08-31T13:20:43Z",
+      "eventTime": "2026-08-31T15:33:07Z",
       "eventSource": "bedrock.amazonaws.com",
       "eventName": "Converse",
       "errorCode": null,
       "modelId": "apac.amazon.nova-lite-v1:0",
       "bearerToken": true,
       "actorType": "IAMUser",
-      "requestIdSha256": "8551c0366f81730c5b19b1708059046eccb12660580920dcaad730bf60039031"
+      "requestIdSha256": "1b06fbaac089af91e8d62fba7f0fcced3ef32c30155c43c2897e754690340928"
     }
   ],
-  "cleanup": {
-    "credentialDeleted": true,
-    "iamUserDeleted": true,
-    "cleanupFailed": false
+  "lifecycle": {
+    "credentialDeleted": false,
+    "iamUserDeleted": false,
+    "cleanupFailed": false,
+    "intentionallyRetained": true,
+    "explicitCleanupAvailable": true
   },
   "redactions": [
     "AWS account ID",

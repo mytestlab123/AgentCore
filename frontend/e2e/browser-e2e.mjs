@@ -1,3 +1,4 @@
+/* global document */
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { chromium } from 'playwright-core';
@@ -14,6 +15,9 @@ const networkRequests = [];
 const externalRequests = [];
 const routeResults = [];
 let expectedDeniedHttp403 = false;
+let awsDeniedHttp403 = false;
+let cloudTrailStatus = 'NOT_APPLICABLE';
+let issue9InitialStatus = 'NOT_APPLICABLE';
 const startedAt = new Date().toISOString();
 
 function assert(condition, message) { if (!condition) throw new Error(message); }
@@ -49,7 +53,13 @@ try {
     }
   });
 
-  const routes = [
+  await page.goto(routeUrl('#/'), { waitUntil: 'domcontentloaded', timeout: 15_000 });
+  const issue9Mode = await page.getByTestId('issue9-proof').isVisible().catch(() => false);
+  const routes = issue9Mode ? [
+    { hash: '#/', name: 'Project', expectedText: 'Native Bedrock access.' },
+    { hash: '#/playground', name: 'Playground', expectedText: 'Model proof' },
+    { hash: '#/logs', name: 'Logs', expectedText: 'CloudTrail evidence' },
+  ] : [
     { hash: '#/', name: 'Project', expectedText: 'Governed model access.' },
     { hash: '#/playground', name: 'Playground', expectedText: 'Playground' },
     { hash: '#/logs', name: 'Logs', expectedText: 'Central audit' },
@@ -61,45 +71,99 @@ try {
     routeResults.push({ ...route, passed: true });
   }
 
-  await page.goto(routeUrl('#/'), { waitUntil: 'domcontentloaded', timeout: 15_000 });
-  await page.getByRole('button', { name: 'Create demo API key' }).click();
-  const platformKey = page.getByTestId('platform-key');
-  await platformKey.filter({ hasText: /^sk-demo-[^*]/ }).waitFor({ timeout: 10_000 });
-  const revealedKey = await platformKey.innerText();
-  assert(revealedKey.startsWith('sk-demo-'), 'Demo platform key was not revealed');
-  await page.getByRole('button', { name: 'Mask key' }).click();
-  const maskedKey = await page.getByTestId('platform-key').innerText();
-  assert(maskedKey.includes('********') && !maskedKey.includes('local-poc-key'), 'Platform key was not masked');
+  let liveMode = false;
+  if (issue9Mode) {
+    await page.goto(routeUrl('#/'), { waitUntil: 'domcontentloaded', timeout: 15_000 });
+    await page.getByTestId('issue9-proof-status').waitFor({ timeout: 15_000 });
+    await page.waitForFunction(() => {
+      const state = document.querySelector('[data-testid="issue9-proof-status"]')?.textContent?.trim();
+      return ['READY', 'RUNNING', 'PASS', 'FAIL'].includes(state || '');
+    }, null, { timeout: 15_000 });
+    const initialStatus = (await page.getByTestId('issue9-proof-status').innerText()).trim();
+    issue9InitialStatus = initialStatus;
+    if (initialStatus === 'READY') {
+      await page.getByRole('button', { name: 'Generate key and run proof' }).click();
+    }
+    if (initialStatus === 'READY' || initialStatus === 'RUNNING') {
+      await page.getByTestId('issue9-proof-status').filter({ hasText: 'PASS' }).waitFor({ timeout: 120_000 });
+    }
+    assert(initialStatus !== 'FAIL', 'Issue #9 backend reported FAIL');
+    const maskedKey = await page.getByTestId('issue9-masked-key').innerText();
+    assert(/^bedrock-[a-f0-9]{12}\*{8}$/.test(maskedKey), 'Browser did not receive the masked key fingerprint');
 
-  await page.goto(routeUrl('#/playground'), { waitUntil: 'domcontentloaded', timeout: 15_000 });
-  const liveMode = await page.getByText('Live Bedrock', { exact: true }).isVisible().catch(() => false);
-  await page.locator('#model').selectOption('apac.amazon.nova-lite-v1:0');
-  await page.getByRole('button', { name: 'Run prompt' }).click();
-  await page.locator('.response-copy').waitFor({ timeout: 35_000 });
-  const allowedText = await page.locator('.response-panel').innerText();
-  if (liveMode) {
-    assert(!allowedText.includes('simulated local response'), 'Live mode returned a simulated response');
+    await page.goto(routeUrl('#/playground'), { waitUntil: 'domcontentloaded', timeout: 15_000 });
+    await page.getByTestId('issue9-allow').filter({ hasText: 'ALLOW 200' }).waitFor({ timeout: 15_000 });
+    const allowedText = await page.getByTestId('issue9-allow').innerText();
+    assert(allowedText.includes('ALLOW 200'), 'Native key did not show the approved HTTP 200 result');
+    assert(allowedText.toLowerCase().includes('governed access works'), 'Real Nova Lite response was not visible');
+    await page.screenshot({ path: path.join(evidenceDir, 'playground-allowed.png'), fullPage: false });
+
+    await page.getByTestId('issue9-deny').filter({ hasText: 'DENY 403' }).waitFor({ timeout: 15_000 });
+    const deniedText = await page.getByTestId('issue9-deny').innerText();
+    assert(deniedText.includes('DENY 403'), 'Native key did not show the restricted HTTP 403 result');
+    assert(deniedText.includes('AWS IAM'), 'AWS IAM enforcement was not visible');
+    awsDeniedHttp403 = true;
+    await page.screenshot({ path: path.join(evidenceDir, 'playground-denied.png'), fullPage: false });
+
+    await page.goto(routeUrl('#/logs'), { waitUntil: 'domcontentloaded', timeout: 15_000 });
+    await page.waitForFunction(() => {
+      const text = document.querySelector('main')?.textContent || '';
+      return text.includes('Audit verified') || text.includes('Core proof complete');
+    }, null, { timeout: 15_000 });
+    const logsText = await page.locator('.data-table').innerText();
+    const auditVerified = await page.getByText('Audit verified', { exact: true }).isVisible().catch(() => false);
+    if (auditVerified) {
+      const normalizedLogsText = logsText.toLowerCase();
+      assert(normalizedLogsText.includes('success') && normalizedLogsText.includes('accessdenied'), 'Verified CloudTrail evidence did not show success and denial');
+      cloudTrailStatus = 'VERIFIED';
+    } else {
+      assert(await page.getByText('Audit pending', { exact: true }).isVisible(), 'CloudTrail state was not visible');
+      assert(await page.getByText('Core proof complete', { exact: true }).isVisible(), 'Non-blocking CloudTrail explanation was not visible');
+      cloudTrailStatus = 'PENDING';
+    }
+    assert((await page.locator('.issue9-cleanup-notice').innerText()).includes('Credential lifecycle'), 'Lifecycle evidence was not visible');
+    await page.screenshot({ path: path.join(evidenceDir, 'logs-allowed-denied.png'), fullPage: false });
   } else {
-    assert(allowedText.includes('simulated local response'), 'Allowed local response was not visible');
+    await page.goto(routeUrl('#/'), { waitUntil: 'domcontentloaded', timeout: 15_000 });
+    await page.getByRole('button', { name: 'Create demo API key' }).click();
+    const platformKey = page.getByTestId('platform-key');
+    await platformKey.filter({ hasText: /^sk-demo-[^*]/ }).waitFor({ timeout: 10_000 });
+    const revealedKey = await platformKey.innerText();
+    assert(revealedKey.startsWith('sk-demo-'), 'Demo platform key was not revealed');
+    await page.getByRole('button', { name: 'Mask key' }).click();
+    const maskedKey = await page.getByTestId('platform-key').innerText();
+    assert(maskedKey.includes('********') && !maskedKey.includes('local-poc-key'), 'Platform key was not masked');
+
+    await page.goto(routeUrl('#/playground'), { waitUntil: 'domcontentloaded', timeout: 15_000 });
+    liveMode = await page.getByText('Live Bedrock', { exact: true }).isVisible().catch(() => false);
+    await page.locator('#model').selectOption('apac.amazon.nova-lite-v1:0');
+    await page.getByRole('button', { name: 'Run prompt' }).click();
+    await page.locator('.response-copy').waitFor({ timeout: 35_000 });
+    const allowedText = await page.locator('.response-panel').innerText();
+    if (liveMode) {
+      assert(!allowedText.includes('simulated local response'), 'Live mode returned a simulated response');
+    } else {
+      assert(allowedText.includes('simulated local response'), 'Allowed local response was not visible');
+    }
+    assert(allowedText.includes('Amazon Nova Lite'), 'Allowed model metadata was missing');
+    assert(allowedText.includes('Allowed'), 'Allowed status was missing');
+    await page.screenshot({ path: path.join(evidenceDir, 'playground-allowed.png'), fullPage: false });
+
+    await page.locator('#model').selectOption('model-premium');
+    await page.getByRole('button', { name: 'Run prompt' }).click();
+    await page.locator('.denied-response').waitFor({ timeout: 10_000 });
+    const deniedText = await page.locator('.response-panel').innerText();
+    assert(deniedText.includes('Not allowed for this project'), 'Denied policy message was missing');
+    assert(deniedText.includes('Denied'), 'Denied status was missing');
+    await page.screenshot({ path: path.join(evidenceDir, 'playground-denied.png'), fullPage: false });
+
+    await page.goto(routeUrl('#/logs'), { waitUntil: 'domcontentloaded', timeout: 15_000 });
+    await page.locator('.table-row:not(.table-head)').nth(1).waitFor({ timeout: 10_000 });
+    const logsText = await page.locator('.data-table').innerText();
+    const normalizedLogsText = logsText.toLowerCase();
+    assert(normalizedLogsText.includes('allowed') && normalizedLogsText.includes('denied'), 'Logs did not include both decisions');
+    await page.screenshot({ path: path.join(evidenceDir, 'logs-allowed-denied.png'), fullPage: false });
   }
-  assert(allowedText.includes('Amazon Nova Lite'), 'Allowed model metadata was missing');
-  assert(allowedText.includes('Allowed'), 'Allowed status was missing');
-  await page.screenshot({ path: path.join(evidenceDir, 'playground-allowed.png'), fullPage: false });
-
-  await page.locator('#model').selectOption('model-premium');
-  await page.getByRole('button', { name: 'Run prompt' }).click();
-  await page.locator('.denied-response').waitFor({ timeout: 10_000 });
-  const deniedText = await page.locator('.response-panel').innerText();
-  assert(deniedText.includes('Not allowed for this project'), 'Denied policy message was missing');
-  assert(deniedText.includes('Denied'), 'Denied status was missing');
-  await page.screenshot({ path: path.join(evidenceDir, 'playground-denied.png'), fullPage: false });
-
-  await page.goto(routeUrl('#/logs'), { waitUntil: 'domcontentloaded', timeout: 15_000 });
-  await page.locator('.table-row:not(.table-head)').nth(1).waitFor({ timeout: 10_000 });
-  const logsText = await page.locator('.data-table').innerText();
-  const normalizedLogsText = logsText.toLowerCase();
-  assert(normalizedLogsText.includes('allowed') && normalizedLogsText.includes('denied'), 'Logs did not include both decisions');
-  await page.screenshot({ path: path.join(evidenceDir, 'logs-allowed-denied.png'), fullPage: false });
 
   await saveJson('routes.json', routeResults);
   await saveJson('network.json', networkRequests);
@@ -115,15 +179,18 @@ try {
   });
   await saveJson('unexpected-console-errors.json', unexpectedConsoleErrors);
   assert(externalRequests.length === 0, 'The local POC made a non-local request');
-  assert(!liveMode || expectedDeniedHttp403, 'Live denial did not return the expected HTTP 403');
+  assert(issue9Mode ? awsDeniedHttp403 : !liveMode || expectedDeniedHttp403, 'Live denial did not return the expected HTTP 403');
   assert(unexpectedConsoleErrors.length === 0, 'Browser console or page errors were detected');
   await saveJson('result.json', {
     status: 'PASS', appUrl, startedAt, finishedAt: new Date().toISOString(),
     viewport: { width: 1920, height: 1080 }, routesChecked: routeResults.length,
-    mode: liveMode ? 'LIVE_BEDROCK' : 'LOCAL_SIMULATION',
-    keyCreatedThenMasked: true, allowedModel: 'Amazon Nova Lite', deniedModel: 'Premium model',
-    logDecisions: ['Allowed', 'Denied'], expectedDeniedHttp403: liveMode,
-    externalRequests: 0, consoleErrors: 0,
+    mode: issue9Mode ? 'LIVE_BEDROCK_API_KEY' : liveMode ? 'LIVE_BEDROCK' : 'LOCAL_SIMULATION',
+    keyCreatedThenMasked: !issue9Mode, keyMaskedInBrowser: true,
+    proofStartedByBrowser: issue9Mode ? issue9InitialStatus === 'READY' : true,
+    allowedModel: 'Amazon Nova Lite', deniedModel: issue9Mode ? 'Amazon Nova Pro' : 'Premium model',
+    logDecisions: issue9Mode ? ['ALLOW', 'DENY'] : ['Allowed', 'Denied'], expectedDeniedHttp403: issue9Mode ? awsDeniedHttp403 : liveMode,
+    browserReceivedAwsSecret: false, externalRequests: 0, consoleErrors: 0,
+    cloudTrailStatus,
   });
 } catch (error) {
   if (page) await page.screenshot({ path: path.join(evidenceDir, 'failure.png'), fullPage: false }).catch(() => {});

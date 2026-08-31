@@ -1,0 +1,115 @@
+import { useEffect, useState } from 'react';
+import { getIssue9Proof, Issue9ProofStatus, startIssue9Proof } from './issue9-api';
+
+function Badge({ children, tone = 'green' }: { children: React.ReactNode; tone?: 'green' | 'amber' | 'gray' }) {
+  return <span className={`badge badge-${tone}`}>{children}</span>;
+}
+
+function PageHeader({ eyebrow, title, description }: { eyebrow: string; title: string; description: string }) {
+  return <header className="page-header"><p className="eyebrow">{eyebrow}</p><h1>{title}</h1><p>{description}</p></header>;
+}
+
+function useProofStatus() {
+  const [status, setStatus] = useState<Issue9ProofStatus | null>(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    const refresh = async () => {
+      try {
+        const next = await getIssue9Proof();
+        if (active) { setStatus(next); setError(''); }
+      } catch (caught) {
+        if (active) setError(caught instanceof Error ? caught.message : 'Could not reach the Issue #9 backend.');
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 1500);
+    return () => { active = false; window.clearInterval(timer); };
+  }, []);
+
+  return { status, setStatus, error, setError };
+}
+
+const proofSteps = [
+  ['keyCreated', 'Generate Bedrock API key', '30-day service-specific credential'],
+  ['approvedModelAllowed', 'Invoke Nova Lite', 'Real Bedrock response must return HTTP 200'],
+  ['restrictedModelDenied', 'Block Nova Pro', 'AWS IAM must return HTTP 403'],
+  ['cleanupVerified', 'Apply lifecycle policy', 'Successful demo retained; failed runs deleted'],
+  ['cloudTrailCaptured', 'Capture CloudTrail', 'Success and AccessDenied events'],
+] as const;
+
+export function Issue9HomePage() {
+  const { status, setStatus, error, setError } = useProofStatus();
+  const start = async () => {
+    setError('');
+    try { setStatus(await startIssue9Proof()); }
+    catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not start the live proof.'); }
+  };
+  const proofUnavailable = status?.state === 'RUNNING' || status?.state === 'PASS';
+
+  return (
+    <div data-testid="issue9-proof">
+      <section className="hero-card compact-hero issue9-hero">
+        <div><div className="hero-kicker"><span className="pulse-dot" /> AWS-native credential</div><h1>Native Bedrock access.<br /><span>Generate once. Demo again.</span></h1><p>Create one model-restricted Bedrock key, prove Nova Lite ALLOW and Nova Pro IAM DENY, capture CloudTrail, then retain the low-cost setup for repeat demos.</p><div className="hero-actions"><button className="button button-primary" type="button" disabled={proofUnavailable} onClick={() => void start()}>{status?.state === 'RUNNING' ? 'Proof running...' : status?.state === 'PASS' ? 'Retained proof ready' : 'Generate key and run proof'}</button><a className="button button-secondary" href="#/playground">View model results</a></div></div>
+        <div className="hero-flow"><div className="flow-node"><small>Local operator backend</small><strong>amit / ap-southeast-1</strong></div><span className="flow-arrow">-&gt;</span><div className="flow-node flow-node-accent"><small>Bedrock API key</small><strong>{status?.key.masked || 'Secret stays server-side'}</strong></div><span className="flow-arrow">-&gt;</span><div className="flow-node"><small>AWS policy</small><strong>Nova Lite ALLOW / Nova Pro DENY</strong></div></div>
+      </section>
+
+      <section className="issue9-control-grid">
+        <article className="panel key-card issue9-key-card">
+          <div className="key-card-top"><div><p className="eyebrow">Live credential</p><h2>Bedrock API key</h2></div><Badge tone={status?.key.deleted ? 'gray' : status?.key.created ? 'green' : 'amber'}>{status?.key.deleted ? 'Deleted' : status?.key.created ? 'Retained' : 'Not created'}</Badge></div>
+          <p className="card-copy">The real secret never enters browser storage, screenshots, URLs, or logs. The GUI receives only a SHA-256 fingerprint.</p>
+          <code data-testid="issue9-masked-key">{status?.key.masked || 'bedrock-********'}</code>
+          <dl><div><dt>AWS profile</dt><dd>amit (server-side)</dd></div><div><dt>Region</dt><dd>ap-southeast-1</dd></div></dl>
+          <div className="notice compact-notice"><span>i</span><div><strong>Retained demo setup</strong><p>Successful resources use cleanup=review, TTL=30-09-26, and a 30-day key lifetime. Failed runs delete automatically.</p></div></div>
+        </article>
+
+        <article className="panel proof-progress-card">
+          <div className="panel-heading"><div><p className="eyebrow">Proof status</p><h2 data-testid="issue9-proof-status">{status?.state || 'CONNECTING'}</h2></div><Badge tone={status?.state === 'PASS' ? 'green' : status?.state === 'FAIL' ? 'gray' : 'amber'}>{status?.phase || 'Connecting'}</Badge></div>
+          {error && <div className="error-box">{error}</div>}
+          {status?.error && <div className="error-box">{status.error}</div>}
+          <ol className="steps issue9-steps">
+            {proofSteps.map(([key, label, detail], index) => <li className={status?.steps[key] ? 'complete' : ''} key={key}><span>{status?.steps[key] ? 'OK' : index + 1}</span><div><strong>{label}</strong><small>{detail}</small></div></li>)}
+          </ol>
+        </article>
+      </section>
+    </div>
+  );
+}
+
+export function Issue9PlaygroundPage() {
+  const { status, error } = useProofStatus();
+  return (
+    <>
+      <div className="page-header-row"><PageHeader eyebrow="Real AWS decisions" title="Model proof" description="The same native Bedrock credential must reach Nova Lite and be blocked from Nova Pro by AWS IAM." /><Badge tone={status?.state === 'PASS' ? 'green' : 'amber'}>{status?.state || 'Connecting'}</Badge></div>
+      {error && <div className="error-box">{error}</div>}
+      {!status?.allowed && !status?.denied ? <div className="notice"><span>i</span><div><strong>No live proof yet</strong><p>Start the bounded proof from Project. Results appear here while it runs.</p></div></div> : null}
+      <section className="issue9-results">
+        <article className="panel proof-result" data-testid="issue9-allow">
+          <div className="response-heading"><div><p className="eyebrow">Approved model</p><h2>Amazon Nova Lite</h2></div><Badge tone={status?.allowed?.httpStatus === 200 ? 'green' : 'amber'}>{status?.allowed ? `ALLOW ${status.allowed.httpStatus}` : 'Pending'}</Badge></div>
+          <div className="response-copy">{status?.allowed?.response || 'Waiting for a real Bedrock response.'}</div>
+          <div className="metadata-grid"><div><span>Model</span><strong>{status?.allowed?.model || 'apac.amazon.nova-lite-v1:0'}</strong></div><div><span>Tokens</span><strong>{status?.allowed ? `${status.allowed.inputTokens} in / ${status.allowed.outputTokens} out` : '-'}</strong></div><div><span>Request proof</span><strong className="mono">{status?.allowed?.requestIdSha256?.slice(0, 12) || '-'}</strong></div></div>
+        </article>
+        <article className="panel proof-result" data-testid="issue9-deny">
+          <div className="response-heading"><div><p className="eyebrow">Restricted model</p><h2>Amazon Nova Pro</h2></div><Badge tone={status?.denied?.httpStatus === 403 ? 'gray' : 'amber'}>{status?.denied ? `DENY ${status.denied.httpStatus}` : 'Pending'}</Badge></div>
+          <div className="error-box denied-response">{status?.denied ? 'Access denied by AWS IAM. The application did not fake this result.' : 'Waiting for the restricted-model test.'}</div>
+          <div className="metadata-grid"><div><span>Model</span><strong>{status?.denied?.model || 'apac.amazon.nova-pro-v1:0'}</strong></div><div><span>Enforced by</span><strong>{status?.denied?.enforcedBy || '-'}</strong></div><div><span>Request proof</span><strong className="mono">{status?.denied?.requestIdSha256?.slice(0, 12) || '-'}</strong></div></div>
+        </article>
+      </section>
+    </>
+  );
+}
+
+export function Issue9LogsPage() {
+  const { status, error } = useProofStatus();
+  return (
+    <>
+      <PageHeader eyebrow="AWS-native audit" title="CloudTrail evidence" description="Sanitized Converse events are correlated with the browser results using request-ID hashes; no bearer token or account identifier is exposed." />
+      {error && <div className="error-box">{error}</div>}
+      <div className="toolbar"><div className="search-box">{status?.cloudTrail.length || 0} CloudTrail event{status?.cloudTrail.length === 1 ? '' : 's'}</div><Badge tone={status?.auditState === 'VERIFIED' ? 'green' : 'amber'}>{status?.auditState === 'VERIFIED' ? 'Audit verified' : 'Audit pending'}</Badge></div>
+      <article className="panel table-panel"><div className="data-table request-table"><div className="table-row table-head"><span>Request proof</span><span>Time</span><span>Operation</span><span>Model</span><span>Bearer key</span><span>Status</span></div>{status?.cloudTrail.map((event) => <div className="table-row" key={`${event.requestIdSha256}-${event.errorCode || 'success'}`}><span className="mono">{event.requestIdSha256?.slice(0, 12)}</span><span>{new Date(event.eventTime).toLocaleTimeString()}</span><span>{event.eventName}</span><span>{event.modelId || 'Not emitted by AWS'}</span><span>{event.bearerToken === true ? 'Confirmed' : 'Not emitted'}</span><span><Badge tone={event.errorCode ? 'gray' : 'green'}>{event.errorCode || 'Success'}</Badge></span></div>)}{!status?.cloudTrail.length && <div className="empty-log">CloudTrail evidence appears after AWS event history catches up.</div>}</div></article>
+      <div className="notice issue9-cleanup-notice"><span>{status?.steps.cleanupVerified ? 'OK' : 'i'}</span><div><strong>Credential lifecycle</strong><p>{status?.cleanup?.intentionallyRetained ? 'The restricted 30-day Bedrock credential is intentionally retained for repeat demos through TTL=30-09-26.' : status?.steps.cleanupVerified ? 'The credential and disposable IAM user are verified deleted.' : 'Lifecycle evidence appears when the proof completes.'}</p></div></div>
+      {status?.state === 'PASS' && status.auditState === 'PENDING' && <div className="notice"><span>i</span><div><strong>Core proof complete</strong><p>HTTP 200 allow, HTTP 403 IAM deny, and credential lifecycle are proven. CloudTrail event history is still propagating and will appear here asynchronously.</p></div></div>}
+    </>
+  );
+}

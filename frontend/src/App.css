@@ -222,6 +222,18 @@ dd { margin: 5px 0 0; color: #c9d6e6; font-size: 11px; font-weight: 700; }
 .metadata-grid strong { margin-top: 7px; overflow: hidden; color: #d4e0ee; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .error-box { margin-top: 18px; padding: 13px; border: 1px solid #784044; border-radius: 8px; color: #ffb4b4; background: rgba(127,29,29,.22); font-size: 11px; }
 
+.issue9-hero { background: radial-gradient(circle at 82% 14%, rgba(45,212,191,.24), transparent 34%), linear-gradient(130deg, #0b1b30, #14314a); }
+.issue9-control-grid { display: grid; grid-template-columns: .92fr 1.08fr; gap: 18px; }
+.issue9-key-card, .proof-progress-card { min-height: 430px; }
+.issue9-key-card dl { margin-top: 22px; }
+.issue9-steps { gap: 19px; }
+.issue9-steps li:not(:last-child)::after { height: 24px; }
+.issue9-steps li > span { font-size: 8px; }
+.issue9-results { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.proof-result { min-height: 420px; }
+.proof-result .metadata-grid { margin-top: 22px; }
+.issue9-cleanup-notice { margin-top: 18px; }
+
 .usage-grid { grid-template-columns: 1.3fr .7fr; }
 .large-chart { height: 210px; gap: 5px; }
 .donut-wrap { min-height: 225px; display: flex; align-items: center; justify-content: center; gap: 34px; }
@@ -257,7 +269,7 @@ dd { margin: 5px 0 0; color: #c9d6e6; font-size: 11px; font-weight: 700; }
   .breadcrumb { display: none; }
   .topbar { padding: 0 18px; }
   .page-content { padding: 22px 18px; }
-  .two-column-grid, .playground-grid, .usage-grid { grid-template-columns: 1fr; }
+  .two-column-grid, .playground-grid, .usage-grid, .issue9-control-grid, .issue9-results { grid-template-columns: 1fr; }
   .hero-card { min-height: 340px; padding: 35px 27px; }
   .table-panel { overflow-x: auto; }
   .page-footer { padding: 18px; }
