@@ -106,6 +106,7 @@ run saw VERIFIED with both events.
 | Dedicated Codex key creation validates profile, caller, model, TTL, and exact model policy | Bash plan/syntax and Python control tests | TEST-PROVEN; AWS NOT RUN |
 | Codex wrapper is ephemeral, hidden-input, and read-only | Bash syntax/capability check and Codex 0.151.0 help | TEST-PROVEN |
 | A governed key successfully invokes Codex through Bedrock | Requires one separately approved live smoke | NOT PROVEN |
+| Codex 0.151.0 accepts the provider/model but rejects `ap-southeast-1` | `docs/evidence/issue-12-codex-bedrock-smoke.md` | LIVE TEST-PROVEN BLOCKER |
 | Claude model selection and Claude Code usage | Separate future issue | NOT IMPLEMENTED |
 
 Screenshots support the GUI claim but do not independently prove AWS
