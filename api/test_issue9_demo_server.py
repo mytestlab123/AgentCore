@@ -7,10 +7,31 @@ import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
-from issue9_demo_server import Issue9Handler, ProofController, build_public_status
+from issue9_demo_server import CodexKeyController, Issue9Handler, ProofController, build_public_status
 
 
 class Issue9DemoStatusTests(unittest.TestCase):
+    def test_codex_key_status_is_masked_and_model_scoped(self):
+        with tempfile.TemporaryDirectory() as directory:
+            retained = Path(directory)
+            (retained / "credential.json").write_text("{}", encoding="utf-8")
+            (retained / "metadata.json").write_text(json.dumps({
+                "model": "openai.gpt-5.6-luna", "keyFingerprint": "abcdef123456",
+            }), encoding="utf-8")
+            controller = CodexKeyController(retained)
+
+            status = controller.status()
+
+        self.assertEqual(status["state"], "CREATED")
+        self.assertEqual(status["model"], "openai.gpt-5.6-luna")
+        self.assertEqual(status["masked"], "bedrock-abcdef123456********")
+
+    def test_codex_key_rejects_non_openai_model_before_aws(self):
+        with tempfile.TemporaryDirectory() as directory:
+            controller = CodexKeyController(directory)
+            with self.assertRaisesRegex(RuntimeError, "exact openai"):
+                controller.start("amazon.nova-lite-v1:0")
+
     def test_reveal_endpoint_requires_allowed_origin_and_disables_cache(self):
         with tempfile.TemporaryDirectory() as directory:
             credential = Path(directory) / "credential.json"

@@ -102,6 +102,8 @@ run saw VERIFIED with both events.
 | Successful setup is retained safely | AWS lifecycle evidence and protected mode-600 file | AWS-PROVEN |
 | Issue #12 reveal is explicit, loopback-origin gated, and no-store | Python HTTP/unit tests | TEST-PROVEN |
 | Issue #12 GUI masks after a fixed 15-second in-memory window | TypeScript state-transition test and implementation review | TEST-PROVEN |
+| Issue #12 GUI labels and links the active version | TypeScript build and source review | TEST-PROVEN |
+| Dedicated Codex key creation validates profile, caller, model, TTL, and exact model policy | Bash plan/syntax and Python control tests | TEST-PROVEN; AWS NOT RUN |
 | Codex wrapper is ephemeral, hidden-input, and read-only | Bash syntax/capability check and Codex 0.151.0 help | TEST-PROVEN |
 | A governed key successfully invokes Codex through Bedrock | Requires one separately approved live smoke | NOT PROVEN |
 | Claude model selection and Claude Code usage | Separate future issue | NOT IMPLEMENTED |

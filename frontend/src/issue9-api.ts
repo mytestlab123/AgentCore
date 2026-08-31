@@ -69,6 +69,41 @@ export interface RevealedKey {
   expiresInSeconds: number;
 }
 
+export interface CodexKeyStatus {
+  state: 'READY' | 'RUNNING' | 'CREATED' | 'FAIL';
+  model: string;
+  masked: string | null;
+  message: string;
+}
+
+async function codexKeyRequest(path: string, init?: RequestInit): Promise<CodexKeyStatus> {
+  if (!issue9ApiBaseUrl) throw new Error('Issue #12 backend URL is not configured.');
+  const response = await fetch(`${issue9ApiBaseUrl}${path}`, init);
+  const body = await response.json() as CodexKeyStatus & { message: string };
+  if (!response.ok) throw new Error(body.message || `Codex key action failed with HTTP ${response.status}`);
+  return body;
+}
+
+export function getCodexKey(): Promise<CodexKeyStatus> {
+  return codexKeyRequest('/codex-key');
+}
+
+export function createCodexKey(model: string): Promise<CodexKeyStatus> {
+  return codexKeyRequest('/codex-key', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ model }),
+  });
+}
+
+export async function revealCodexKey(): Promise<RevealedKey> {
+  if (!issue9ApiBaseUrl) throw new Error('Issue #12 backend URL is not configured.');
+  const response = await fetch(`${issue9ApiBaseUrl}/codex-key/reveal`, { method: 'POST', cache: 'no-store' });
+  const body = await response.json() as RevealedKey & { message?: string };
+  if (!response.ok) throw new Error(body.message || `Codex key reveal failed with HTTP ${response.status}`);
+  return body;
+}
+
 export async function revealIssue9Key(): Promise<RevealedKey> {
   if (!issue9ApiBaseUrl) throw new Error('Issue #9 backend URL is not configured.');
   const response = await fetch(`${issue9ApiBaseUrl}/key/reveal`, { method: 'POST', cache: 'no-store' });

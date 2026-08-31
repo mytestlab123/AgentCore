@@ -10,6 +10,8 @@ done
 
 AWS_PROFILE=profile-that-must-not-exist \
   "$repo_dir/scripts/bedrock-api-key-poc.sh" --plan >/dev/null
+AWS_PROFILE=amit AWS_REGION=ap-southeast-1 \
+  "$repo_dir/scripts/create-codex-bedrock-key.sh" --plan >/dev/null
 "$repo_dir/scripts/codex-bedrock-smoke.sh" --check >/dev/null
 "$repo_dir/scripts/test-codex-bedrock-smoke.sh"
 if rg -n 'localStorage|sessionStorage|indexedDB' \

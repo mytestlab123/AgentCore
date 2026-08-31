@@ -228,6 +228,12 @@ dd { margin: 5px 0 0; color: #c9d6e6; font-size: 11px; font-weight: 700; }
 .issue9-key-card dl { margin-top: 22px; }
 .key-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; margin: -6px 0 18px; }
 .key-actions small { color: var(--muted); }
+.codex-key-card { margin-bottom: 18px; }
+.codex-key-card h2 { margin-top: 4px; }
+.codex-key-card code { display: block; margin: 15px 0; padding: 11px; border: 1px solid var(--line); border-radius: 7px; color: #c5d3e4; background: #081321; font-size: 11px; }
+.codex-key-controls { display: grid; grid-template-columns: minmax(240px, 1fr) auto; align-items: end; gap: 12px; }
+.codex-key-controls label span { display: block; margin-bottom: 6px; color: var(--muted); font-size: 10px; text-transform: uppercase; }
+.codex-key-controls input { width: 100%; min-height: 40px; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px; color: var(--text); background: #081321; }
 .issue9-steps { gap: 19px; }
 .issue9-steps li:not(:last-child)::after { height: 24px; }
 .issue9-steps li > span { font-size: 8px; }

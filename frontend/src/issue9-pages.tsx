@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getIssue9Proof, Issue9ProofStatus, revealIssue9Key, startIssue9Proof } from './issue9-api';
+import { createCodexKey, getCodexKey, getIssue9Proof, Issue9ProofStatus, revealCodexKey, revealIssue9Key, startIssue9Proof } from './issue9-api';
 
 export const KEY_REVEAL_SECONDS = 15;
 export const nextRevealSeconds = (seconds: number) => Math.max(0, seconds - 1);
@@ -46,6 +46,10 @@ export function Issue9HomePage() {
   const { status, setStatus, error, setError } = useProofStatus();
   const [revealedKey, setRevealedKey] = useState('');
   const [revealSeconds, setRevealSeconds] = useState(0);
+  const [codexStatus, setCodexStatus] = useState<Awaited<ReturnType<typeof getCodexKey>> | null>(null);
+  const [codexModel, setCodexModel] = useState('openai.gpt-5.6-luna');
+  const [codexKey, setCodexKey] = useState('');
+  const [codexSeconds, setCodexSeconds] = useState(0);
   const start = async () => {
     setError('');
     try { setStatus(await startIssue9Proof()); }
@@ -64,6 +68,26 @@ export function Issue9HomePage() {
     }, 1000);
     return () => window.clearTimeout(timer);
   }, [revealedKey, revealSeconds]);
+  useEffect(() => {
+    let active = true;
+    const refresh = async () => {
+      try {
+        const next = await getCodexKey();
+        if (active) setCodexStatus(next);
+      } catch { /* Main proof error handling remains separate. */ }
+    };
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 1500);
+    return () => { active = false; window.clearInterval(timer); };
+  }, []);
+  useEffect(() => {
+    if (!codexKey || codexSeconds <= 0) return;
+    const timer = window.setTimeout(() => {
+      if (codexSeconds === 1) { setCodexKey(''); setCodexSeconds(0); }
+      else setCodexSeconds(nextRevealSeconds);
+    }, 1000);
+    return () => window.clearTimeout(timer);
+  }, [codexKey, codexSeconds]);
 
   const reveal = async () => {
     setError('');
@@ -81,6 +105,24 @@ export function Issue9HomePage() {
     try { await navigator.clipboard.writeText(revealedKey); }
     catch { setError('Clipboard access failed. Select and copy the revealed key manually.'); }
   };
+  const generateCodexKey = async () => {
+    setError('');
+    try { setCodexStatus(await createCodexKey(codexModel.trim())); }
+    catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not create the Codex key.'); }
+  };
+  const revealCodex = async () => {
+    setError('');
+    try {
+      const result = await revealCodexKey();
+      setCodexKey(result.key);
+      setCodexSeconds(Math.min(result.expiresInSeconds, KEY_REVEAL_SECONDS));
+    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not reveal the Codex key.'); }
+  };
+  const copyCodex = async () => {
+    if (!codexKey) return;
+    try { await navigator.clipboard.writeText(codexKey); }
+    catch { setError('Clipboard access failed. Select and copy the revealed key manually.'); }
+  };
 
   return (
     <div data-testid="issue9-proof">
@@ -88,6 +130,22 @@ export function Issue9HomePage() {
         <div><div className="hero-kicker"><span className="pulse-dot" /> AWS-native credential</div><h1>Native Bedrock access.<br /><span>Generate once. Demo again.</span></h1><p>Create one model-restricted Bedrock key, prove Nova Lite ALLOW and Nova Pro IAM DENY, capture CloudTrail, then retain the low-cost setup for repeat demos.</p><div className="hero-actions"><button className="button button-primary" type="button" disabled={proofUnavailable} onClick={() => void start()}>{status?.state === 'RUNNING' ? 'Proof running...' : status?.state === 'PASS' ? 'Retained proof ready' : 'Generate key and run proof'}</button><a className="button button-secondary" href="#/playground">View model results</a></div></div>
         <div className="hero-flow"><div className="flow-node"><small>Local operator backend</small><strong>amit / ap-southeast-1</strong></div><span className="flow-arrow">-&gt;</span><div className="flow-node flow-node-accent"><small>Bedrock API key</small><strong>{status?.key.masked || 'Secret stays server-side'}</strong></div><span className="flow-arrow">-&gt;</span><div className="flow-node"><small>AWS policy</small><strong>Nova Lite ALLOW / Nova Pro DENY</strong></div></div>
       </section>
+
+      <article className="panel codex-key-card">
+        <div className="key-card-top"><div><p className="eyebrow">Issue #12 developer credential</p><h2>Codex AI key</h2></div><Badge tone={codexStatus?.state === 'CREATED' ? 'green' : codexStatus?.state === 'FAIL' ? 'gray' : 'amber'}>{codexStatus?.state || 'READY'}</Badge></div>
+        <p className="card-copy">Create one separate 30-day Bedrock service-specific credential for an explicitly selected OpenAI model. No automatic model or Region fallback.</p>
+        <div className="codex-key-controls">
+          <label><span>Exact Bedrock model ID</span><input value={codexModel} disabled={codexStatus?.state === 'RUNNING' || codexStatus?.state === 'CREATED'} onChange={(event) => setCodexModel(event.target.value)} /></label>
+          <button className="button button-primary" type="button" disabled={codexStatus?.state === 'RUNNING' || codexStatus?.state === 'CREATED'} onClick={() => void generateCodexKey()}>{codexStatus?.state === 'RUNNING' ? 'Creating...' : codexStatus?.state === 'CREATED' ? 'Codex key created' : 'Create Codex AI key'}</button>
+        </div>
+        <code>{codexKey || codexStatus?.masked || 'bedrock-********'}</code>
+        <div className="key-actions">
+          <button className="button button-secondary compact" type="button" disabled={codexStatus?.state !== 'CREATED' || Boolean(codexKey)} onClick={() => void revealCodex()}>Reveal Codex key</button>
+          <button className="button button-primary compact" type="button" disabled={!codexKey} onClick={() => void copyCodex()}>Copy for another Codex</button>
+          <small>{codexKey ? `Masks in ${codexSeconds}s` : codexStatus?.message || 'Not created'}</small>
+        </div>
+        <div className="notice compact-notice"><span>i</span><div><strong>Next step</strong><p>Copy the key, then follow docs/CODEX_BEDROCK_KEY_DEMO.md. The wrapper uses hidden input and does not alter normal Codex login.</p></div></div>
+      </article>
 
       <section className="issue9-control-grid">
         <article className="panel key-card issue9-key-card">

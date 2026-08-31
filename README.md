@@ -82,6 +82,13 @@ prompt. The default model is `openai.gpt-5.6-luna` with low reasoning. Set
 when needed; there is no automatic fallback. See
 [the Issue #12 operator guide](docs/CODEX_BEDROCK_KEY_DEMO.md).
 
+The Issue #12 GUI links directly to the real GitHub issue and includes
+**Create Codex AI key**. Clicking it is an explicit AWS mutation: it creates a
+separate model-scoped IAM user and 30-day Bedrock service-specific credential
+with `TTL=01-10-26` and `cleanup=review`. At-rest IAM/key cost is zero; model
+invocations remain usage-billed. The GUI refuses to guess or fall back when the
+entered OpenAI model is unavailable in `ap-southeast-1`.
+
 Explicit cleanup is separate and is not part of the repeat-demo path:
 
 ```bash
