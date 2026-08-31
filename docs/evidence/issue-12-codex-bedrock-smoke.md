@@ -1,53 +1,63 @@
-# Issue #12 Codex-on-Bedrock smoke result
+# Issue #12 Codex-on-Bedrock E2E result
 
 Date: 2026-09-01 (Asia/Singapore)
+Base commit before the Region/key rotation: `449c839`
+Change-budget result: 3 product/automation files plus small GUI/docs updates;
+no new service, dependency, framework, or parallel runner.
 
 ## Result
 
-`FAIL - REGION NOT SUPPORTED BY CODEX CLIENT`
+`BLOCKED - OPENAI MODELS NOT ENABLED FOR THIS AWS ACCOUNT`
 
-One bounded smoke ran in the temporary tmux session
-`agentcore-codex-bedrock-test:smoke`.
+The bounded tests ran in temporary tmux session
+`agentcore-codex-bedrock-test:smoke` using:
 
-Verified configuration:
+- Codex CLI `0.151.0`;
+- provider `amazon-bedrock`;
+- low reasoning and read-only sandbox;
+- ephemeral isolated `CODEX_HOME` with no OpenAI subscription login;
+- the protected `codex1` Bedrock key, never argv or output;
+- `us-east-2` and the single `project/default` policy boundary.
 
-- Codex CLI: `0.151.0`
-- provider: `amazon-bedrock`
-- model: `openai.gpt-5.6-luna`
-- reasoning: `low`
-- sandbox: `read-only`
-- approval: `never`
-- session persistence: disabled (`--ephemeral`)
-- normal OpenAI login/config: isolated with a temporary `CODEX_HOME`
-- authentication variable: `AWS_BEARER_TOKEN_BEDROCK`
-- Region: `ap-southeast-1`
+## E2E progression
 
-Codex stopped with:
+1. Singapore stopped before inference because Codex does not support
+   `ap-southeast-1` for this provider.
+2. The Singapore-scoped credential was deleted and verified absent.
+3. A new 30-day `us-east-2` credential was created and atomically replaced
+   only `codex1` in `/home/user/git/awsops/.env`; `nova` was preserved.
+4. AWS IAM exposed and then accepted the exact Mantle permissions:
+   `bedrock-mantle:CallWithBearerToken` on `*` and
+   `bedrock-mantle:CreateInference` on the one default-project resource.
+5. Luna and then Terra reached the real Mantle Responses endpoint, but both
+   returned HTTP 401: the selected model is not available for this account.
+
+No successful inference or answer was produced. No further model was tried.
+
+## Account availability discrepancy
+
+The read-only `GetFoundationModelAvailability` API reported Luna and Terra as:
 
 ```text
-Fatal error: Amazon Bedrock does not support region `ap-southeast-1`
+authorizationStatus=AUTHORIZED
+entitlementAvailability=AVAILABLE
+regionAvailability=AVAILABLE
 ```
 
-The fixture was not answered and no successful model inference was recorded.
-No model or Region fallback and no second request were attempted.
+AWS Knowledge MCP research found no official documentation explaining why the
+Mantle endpoint can still return this account-level 401. The error explicitly
+directs the customer to AWS Sales. AWS Support/Sales is therefore the next
+valid action; trying more models is not evidence-driven.
 
 ## Proof boundary
 
-PROVEN:
+DEMO-PROVEN / TEST-PROVEN:
 
-- the protected Codex key can be injected without argv, chat, or output;
-- Codex selects the built-in Amazon Bedrock provider and exact Luna model;
-- the smoke is isolated, ephemeral, and read-only;
-- Codex 0.151.0 rejects the selected Singapore Region before completion.
+- key rotation, mode-600 `.env`, separate Nova/Codex values, provider routing,
+  Region routing, real Mantle authentication, and least-privilege IAM path;
+- the E2E failure is account model enablement, not OpenAI subscription auth.
 
 NOT PROVEN:
 
-- successful Codex inference through Amazon Bedrock;
-- key policy correctness in a Codex-supported Region;
-- billed model usage or CloudTrail inference evidence.
-
-## Required next decision
-
-Select and approve one Codex-supported AWS Region, update the dedicated Issue
-#12 model policy to that exact Region, and run one retry. Do not silently fall
-back or broaden the policy to multiple Regions.
+- successful Codex model output through Bedrock;
+- billed model usage or successful CloudTrail inference evidence.

@@ -4,9 +4,10 @@ set -o errexit -o nounset -o pipefail
 umask 077
 
 mode=${1:---plan}
+update_policy=false
 profile=${AWS_PROFILE:-amit}
-region=${AWS_REGION:-ap-southeast-1}
-model=${ISSUE12_CODEX_MODEL:-openai.gpt-5.6-luna}
+region=${ISSUE12_REGION:-us-east-2}
+model=${ISSUE12_CODEX_MODEL:-openai.gpt-5.6-terra}
 expected_account=${EXPECTED_AWS_ACCOUNT:-}
 expected_caller_arn=${EXPECTED_AWS_CALLER_ARN:-}
 ttl=${ISSUE12_TTL:-01-10-26}
@@ -26,10 +27,11 @@ print_plan() {
 case "$mode" in
   --plan) print_plan; exit 0 ;;
   --approve-run) ;;
-  *) echo 'Usage: create-codex-bedrock-key.sh [--plan|--approve-run]' >&2; exit 2 ;;
+  --approve-policy-update) update_policy=true ;;
+  *) echo 'Usage: create-codex-bedrock-key.sh [--plan|--approve-run|--approve-policy-update]' >&2; exit 2 ;;
 esac
-if [[ $profile != amit || $region != ap-southeast-1 ]]; then
-  echo 'NO-GO: Issue #12 is fixed to amit in ap-southeast-1.' >&2
+if [[ $profile != amit || $region != us-east-2 ]]; then
+  echo 'NO-GO: Issue #12 Codex key is fixed to amit in us-east-2.' >&2
   exit 2
 fi
 if [[ -z $expected_account || -z $expected_caller_arn ]]; then
@@ -47,7 +49,7 @@ fi
 for command_name in aws cut install jq sha256sum; do
   command -v "$command_name" >/dev/null 2>&1 || { echo "ERROR: missing command: $command_name" >&2; exit 1; }
 done
-if [[ -e $credential_file ]]; then
+if [[ $update_policy == false && -e $credential_file ]]; then
   echo 'NO-GO: a retained Issue #12 Codex key already exists.' >&2
   exit 2
 fi
@@ -64,16 +66,29 @@ aws bedrock get-foundation-model --profile "$profile" --region "$region" \
   --model-identifier "$model" >"$evidence_dir/model.json"
 jq -e --arg model "$model" '.modelDetails.modelId == $model and .modelDetails.modelLifecycle.status == "ACTIVE"' \
   "$evidence_dir/model.json" >/dev/null || { echo "NO-GO: model is not active: $model" >&2; exit 2; }
+policy_file=$evidence_dir/policy.json
+jq -n --arg region "$region" --arg account "$account" --arg model "$model" '{Version:"2012-10-17",Statement:[
+  {Sid:"AllowLongTermBedrockBearerToken",Effect:"Allow",Action:"bedrock:CallWithBearerToken",Resource:"*",Condition:{StringEquals:{"bedrock:bearerTokenType":"LONG_TERM"}}},
+  {Sid:"AllowMantleBearerToken",Effect:"Allow",Action:"bedrock-mantle:CallWithBearerToken",Resource:"*"},
+  {Sid:"AllowApprovedCodexModelOnly",Effect:"Allow",Action:["bedrock:InvokeModel","bedrock:InvokeModelWithResponseStream"],Resource:["arn:aws:bedrock:\($region)::foundation-model/\($model)"]},
+  {Sid:"AllowDefaultCodexProjectInference",Effect:"Allow",Action:"bedrock-mantle:CreateInference",Resource:"arn:aws:bedrock-mantle:\($region):\($account):project/default"}
+]}' >"$policy_file"
+
+if [[ $update_policy == true ]]; then
+  aws iam get-user --profile "$profile" --user-name "$user_name" >"$evidence_dir/existing-user.json"
+  aws iam put-user-policy --profile "$profile" --user-name "$user_name" --policy-name "$policy_name" \
+    --policy-document "file://$policy_file" >"$evidence_dir/put-policy.json"
+  if [[ -f $metadata_file ]]; then
+    jq --arg model "$model" '.model = $model' "$metadata_file" >"$evidence_dir/metadata.json"
+    install -m 600 "$evidence_dir/metadata.json" "$metadata_file"
+  fi
+  echo "PASS: Issue #12 policy updated for the exact default Codex project in $region."
+  exit 0
+fi
 if aws iam get-user --profile "$profile" --user-name "$user_name" >"$evidence_dir/existing-user.json" 2>/dev/null; then
   echo "NO-GO: dedicated IAM user already exists: $user_name" >&2
   exit 2
 fi
-
-policy_file=$evidence_dir/policy.json
-jq -n --arg region "$region" --arg model "$model" '{Version:"2012-10-17",Statement:[
-  {Sid:"AllowLongTermBedrockBearerToken",Effect:"Allow",Action:"bedrock:CallWithBearerToken",Resource:"*",Condition:{StringEquals:{"bedrock:bearerTokenType":"LONG_TERM"}}},
-  {Sid:"AllowApprovedCodexModelOnly",Effect:"Allow",Action:["bedrock:InvokeModel","bedrock:InvokeModelWithResponseStream"],Resource:["arn:aws:bedrock:\($region)::foundation-model/\($model)"]}
-]}' >"$policy_file"
 
 created=false
 credential_id=''

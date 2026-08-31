@@ -47,7 +47,7 @@ export function Issue9HomePage() {
   const [revealedKey, setRevealedKey] = useState('');
   const [revealSeconds, setRevealSeconds] = useState(0);
   const [codexStatus, setCodexStatus] = useState<Awaited<ReturnType<typeof getCodexKey>> | null>(null);
-  const [codexModel, setCodexModel] = useState('openai.gpt-5.6-luna');
+  const [codexModel, setCodexModel] = useState('openai.gpt-5.6-terra');
   const [codexKey, setCodexKey] = useState('');
   const [codexSeconds, setCodexSeconds] = useState(0);
   const start = async () => {

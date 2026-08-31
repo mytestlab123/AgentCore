@@ -5,7 +5,7 @@ umask 077
 
 [[ ${1:-} == --approve-cleanup ]] || { echo 'Usage: cleanup-issue12-codex-key.sh --approve-cleanup' >&2; exit 2; }
 profile=${AWS_PROFILE:-amit}
-region=${AWS_REGION:-ap-southeast-1}
+region=${ISSUE12_REGION:-us-east-2}
 expected_account=${EXPECTED_AWS_ACCOUNT:-}
 expected_caller_arn=${EXPECTED_AWS_CALLER_ARN:-}
 user_name=agentcore-issue12-codex-key-user-r1
@@ -13,8 +13,8 @@ policy_name=AgentCoreIssue12CodexKeyPolicy
 retained_dir=${ISSUE12_RETAIN_DIR:-$HOME/.AGENTS-temp/AgentCore/issue12-codex-key}
 evidence_dir=$HOME/.AGENTS-temp/AgentCore/issue12-codex-key-cleanup/$(date '+%Y%m%dT%H%M%S%z')
 
-if [[ $profile != amit || $region != ap-southeast-1 || -z $expected_account || -z $expected_caller_arn ]]; then
-  echo 'NO-GO: cleanup requires the exact amit/ap-southeast-1 account and caller gates.' >&2
+if [[ $profile != amit || $region != us-east-2 || -z $expected_account || -z $expected_caller_arn ]]; then
+  echo 'NO-GO: cleanup requires the exact amit/us-east-2 account and caller gates.' >&2
   exit 2
 fi
 install -d -m 700 "$evidence_dir"

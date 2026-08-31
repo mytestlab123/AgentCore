@@ -22,7 +22,8 @@ it. Clear the clipboard manually after the demo.
 
 ## Model selection
 
-The default candidate is `openai.gpt-5.6-luna` with low reasoning. A different
+The current retained policy candidate is `openai.gpt-5.6-terra` with low reasoning. AWS
+currently returns account-unavailable for both Terra and Luna. A different
 cheap OpenAI model can be chosen explicitly after account and Region preflight:
 
 ```bash
@@ -42,7 +43,7 @@ configuration:
 
 ```bash
 cd /home/user/git/AgentCore
-CODEX_BEDROCK_MODEL='openai.gpt-5.6-luna' \
+CODEX_BEDROCK_MODEL='openai.gpt-5.6-terra' \
   ./scripts/codex-bedrock-smoke.sh
 ```
 
@@ -55,7 +56,7 @@ Prompt for another Codex assistant:
 
 > Configure one ephemeral read-only Codex CLI smoke using the built-in
 > amazon-bedrock provider. Prompt for AWS_BEARER_TOKEN_BEDROCK using hidden
-> input, set AWS_REGION=ap-southeast-1, use the exact model shown in the
+> input, set AWS_REGION=us-east-2, use the exact model shown in the
 > AgentCore GUI with low reasoning, do not persist the key or change my normal
 > login, and do not enable model or Region fallback.
 
@@ -65,7 +66,7 @@ After the demo, clear the clipboard and close the shell. Do not put the key in
 Targeted cleanup, only when explicitly approved:
 
 ```bash
-AWS_PROFILE=amit AWS_REGION=ap-southeast-1 \
+AWS_PROFILE=amit ISSUE12_REGION=us-east-2 \
   ./scripts/cleanup-issue12-codex-key.sh --approve-cleanup
 ```
 

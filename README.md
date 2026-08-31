@@ -77,7 +77,8 @@ not block the core HTTP 200/403/lifecycle proof. See the
 
 For the Codex handoff, run `./scripts/codex-bedrock-smoke.sh --check`, then
 `./scripts/codex-bedrock-smoke.sh` and paste the copied key at its hidden
-prompt. The default model is `openai.gpt-5.6-luna` with low reasoning. Set
+prompt. The retained policy model is `openai.gpt-5.6-terra` with low reasoning;
+the current AWS account still returns model-unavailable. Set
 `CODEX_BEDROCK_MODEL` to another explicitly verified cheap OpenAI Bedrock model
 when needed; there is no automatic fallback. See
 [the Issue #12 operator guide](docs/CODEX_BEDROCK_KEY_DEMO.md).
@@ -87,7 +88,7 @@ The Issue #12 GUI links directly to the real GitHub issue and includes
 separate model-scoped IAM user and 30-day Bedrock service-specific credential
 with `TTL=01-10-26` and `cleanup=review`. At-rest IAM/key cost is zero; model
 invocations remain usage-billed. The GUI refuses to guess or fall back when the
-entered OpenAI model is unavailable in `ap-southeast-1`.
+entered OpenAI model is unavailable in the approved Codex Region, `us-east-2`.
 
 Explicit cleanup is separate and is not part of the repeat-demo path:
 
