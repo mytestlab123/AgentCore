@@ -10,6 +10,13 @@ done
 
 AWS_PROFILE=profile-that-must-not-exist \
   "$repo_dir/scripts/bedrock-api-key-poc.sh" --plan >/dev/null
+"$repo_dir/scripts/codex-bedrock-smoke.sh" --check >/dev/null
+"$repo_dir/scripts/test-codex-bedrock-smoke.sh"
+if rg -n 'localStorage|sessionStorage|indexedDB' \
+  "$repo_dir/frontend/src/issue9-api.ts" "$repo_dir/frontend/src/issue9-pages.tsx"; then
+  echo 'NO-GO: credential UI must not use browser persistence.' >&2
+  exit 1
+fi
 
 npm ci --prefix "$repo_dir/frontend"
 npm audit --audit-level=high --prefix "$repo_dir/frontend"

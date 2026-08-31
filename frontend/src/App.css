@@ -226,6 +226,8 @@ dd { margin: 5px 0 0; color: #c9d6e6; font-size: 11px; font-weight: 700; }
 .issue9-control-grid { display: grid; grid-template-columns: .92fr 1.08fr; gap: 18px; }
 .issue9-key-card, .proof-progress-card { min-height: 430px; }
 .issue9-key-card dl { margin-top: 22px; }
+.key-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; margin: -6px 0 18px; }
+.key-actions small { color: var(--muted); }
 .issue9-steps { gap: 19px; }
 .issue9-steps li:not(:last-child)::after { height: 24px; }
 .issue9-steps li > span { font-size: 8px; }

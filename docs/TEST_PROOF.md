@@ -100,6 +100,10 @@ run saw VERIFIED with both events.
 | Native Bedrock key invokes Nova Lite | HTTP 200 client record and CloudTrail | AWS-PROVEN |
 | AWS IAM denies Nova Pro | HTTP 403 client record and CloudTrail AccessDenied | AWS-PROVEN |
 | Successful setup is retained safely | AWS lifecycle evidence and protected mode-600 file | AWS-PROVEN |
+| Issue #12 reveal is explicit, loopback-origin gated, and no-store | Python HTTP/unit tests | TEST-PROVEN |
+| Issue #12 GUI masks after a fixed 15-second in-memory window | TypeScript state-transition test and implementation review | TEST-PROVEN |
+| Codex wrapper is ephemeral, hidden-input, and read-only | Bash syntax/capability check and Codex 0.151.0 help | TEST-PROVEN |
+| A governed key successfully invokes Codex through Bedrock | Requires one separately approved live smoke | NOT PROVEN |
 | Claude model selection and Claude Code usage | Separate future issue | NOT IMPLEMENTED |
 
 Screenshots support the GUI claim but do not independently prove AWS

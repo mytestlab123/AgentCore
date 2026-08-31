@@ -64,6 +64,19 @@ async function request(path: string, init?: RequestInit): Promise<Issue9ProofSta
   return body;
 }
 
+export interface RevealedKey {
+  key: string;
+  expiresInSeconds: number;
+}
+
+export async function revealIssue9Key(): Promise<RevealedKey> {
+  if (!issue9ApiBaseUrl) throw new Error('Issue #9 backend URL is not configured.');
+  const response = await fetch(`${issue9ApiBaseUrl}/key/reveal`, { method: 'POST', cache: 'no-store' });
+  const body = await response.json() as RevealedKey & { message?: string };
+  if (!response.ok) throw new Error(body.message || `Key reveal failed with HTTP ${response.status}`);
+  return body;
+}
+
 export function getIssue9Proof(): Promise<Issue9ProofStatus> {
   return request('/proof');
 }

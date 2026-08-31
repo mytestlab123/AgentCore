@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 REPO_DIR = Path(__file__).resolve().parents[1]
 PROOF_SCRIPT = REPO_DIR / "scripts" / "bedrock-api-key-poc.sh"
 DEFAULT_EVIDENCE_ROOT = Path.home() / ".AGENTS-temp" / "AgentCore" / "issue9-gui"
+DEFAULT_RETAINED_CREDENTIAL = Path.home() / ".AGENTS-temp" / "AgentCore" / "issue9-retained" / "credential.json"
 ALLOWED_MODEL = "apac.amazon.nova-lite-v1:0"
 RESTRICTED_MODEL = "apac.amazon.nova-pro-v1:0"
 
@@ -155,8 +156,9 @@ def build_public_status(evidence_dir, process_running=False, return_code=None):
 
 
 class ProofController:
-    def __init__(self, evidence_root=DEFAULT_EVIDENCE_ROOT):
+    def __init__(self, evidence_root=DEFAULT_EVIDENCE_ROOT, retained_credential=DEFAULT_RETAINED_CREDENTIAL):
         self.evidence_root = Path(evidence_root)
+        self.retained_credential = Path(retained_credential)
         self.lock = threading.Lock()
         self.process = None
         self.evidence_dir = None
@@ -170,6 +172,23 @@ class ProofController:
                     self.evidence_dir = candidate
                     self.return_code = 0
                     break
+
+    def reveal_key(self):
+        try:
+            mode = self.retained_credential.stat().st_mode & 0o777
+        except OSError as error:
+            raise RuntimeError("The retained demo key is not available.") from error
+        if mode != 0o600:
+            raise RuntimeError("The retained demo key must have mode 600.")
+        credential = _read_json(self.retained_credential)
+        if not credential:
+            raise RuntimeError("The retained demo key is unreadable.")
+        value = credential.get("ServiceSpecificCredential", {}).get("ServiceApiKeyValue")
+        if not value:
+            value = credential.get("ServiceSpecificCredential", {}).get("ServiceCredentialSecret")
+        if not value:
+            raise RuntimeError("The retained demo key has an unsupported format.")
+        return {"key": value, "expiresInSeconds": 15}
 
     def start(self):
         with self.lock:
@@ -314,8 +333,17 @@ class Issue9Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         path = urlparse(self.path).path
         origin = self.headers.get("Origin", "")
-        if origin and origin not in self.allowed_origins:
+        if self.client_address[0] not in {"127.0.0.1", "::1"}:
+            self._send_json(403, {"message": "Loopback access required"})
+            return
+        if origin not in self.allowed_origins:
             self._send_json(403, {"message": "Origin not allowed"})
+            return
+        if path == "/key/reveal":
+            try:
+                self._send_json(200, self.controller.reveal_key())
+            except RuntimeError as error:
+                self._send_json(409, {"message": str(error)})
             return
         if path != "/proof":
             self._send_json(404, {"message": "Not found"})

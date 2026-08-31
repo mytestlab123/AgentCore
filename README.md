@@ -69,10 +69,18 @@ AWS_PROFILE=amit AWS_REGION=ap-southeast-1 \
 ```
 
 Open `http://127.0.0.1:5174/` and use **Generate key and run proof**. The full
-secret remains server-side in a mode-600 ignored file; the browser receives
-only a SHA-256 fingerprint. CloudTrail propagation is asynchronous and does
+secret remains in a mode-600 ignored file. Issue #12 adds an explicit
+loopback-only reveal/copy action that holds the secret in page memory for 15
+seconds and then masks it. CloudTrail propagation is asynchronous and does
 not block the core HTTP 200/403/lifecycle proof. See the
 [Issue #9 proof and developer guide](docs/ISSUE_9_BEDROCK_API_KEYS.md).
+
+For the Codex handoff, run `./scripts/codex-bedrock-smoke.sh --check`, then
+`./scripts/codex-bedrock-smoke.sh` and paste the copied key at its hidden
+prompt. The default model is `openai.gpt-5.6-luna` with low reasoning. Set
+`CODEX_BEDROCK_MODEL` to another explicitly verified cheap OpenAI Bedrock model
+when needed; there is no automatic fallback. See
+[the Issue #12 operator guide](docs/CODEX_BEDROCK_KEY_DEMO.md).
 
 Explicit cleanup is separate and is not part of the repeat-demo path:
 

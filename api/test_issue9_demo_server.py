@@ -1,12 +1,67 @@
 import json
 import tempfile
+import threading
 import unittest
+import urllib.error
+import urllib.request
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 
-from issue9_demo_server import build_public_status
+from issue9_demo_server import Issue9Handler, ProofController, build_public_status
 
 
 class Issue9DemoStatusTests(unittest.TestCase):
+    def test_reveal_endpoint_requires_allowed_origin_and_disables_cache(self):
+        with tempfile.TemporaryDirectory() as directory:
+            credential = Path(directory) / "credential.json"
+            credential.write_text(json.dumps({
+                "ServiceSpecificCredential": {"ServiceApiKeyValue": "bedrock-secret-demo"},
+            }), encoding="utf-8")
+            credential.chmod(0o600)
+            Issue9Handler.controller = ProofController(Path(directory) / "evidence", credential)
+            server = ThreadingHTTPServer(("127.0.0.1", 0), Issue9Handler)
+            worker = threading.Thread(target=server.serve_forever, daemon=True)
+            worker.start()
+            url = f"http://127.0.0.1:{server.server_port}/key/reveal"
+            try:
+                request = urllib.request.Request(
+                    url, method="POST", headers={"Origin": "http://127.0.0.1:5174"}
+                )
+                with urllib.request.urlopen(request) as response:
+                    body = json.loads(response.read())
+                    self.assertEqual(response.headers["Cache-Control"], "no-store")
+                    self.assertEqual(body["key"], "bedrock-secret-demo")
+                with self.assertRaises(urllib.error.HTTPError) as rejected:
+                    urllib.request.urlopen(urllib.request.Request(url, method="POST"))
+                self.assertEqual(rejected.exception.code, 403)
+            finally:
+                server.shutdown()
+                server.server_close()
+                worker.join()
+
+    def test_reveal_reads_only_mode_600_retained_key(self):
+        with tempfile.TemporaryDirectory() as directory:
+            credential = Path(directory) / "credential.json"
+            credential.write_text(json.dumps({
+                "ServiceSpecificCredential": {"ServiceApiKeyValue": "bedrock-secret-demo"},
+            }), encoding="utf-8")
+            credential.chmod(0o600)
+            controller = ProofController(Path(directory) / "evidence", credential)
+
+            revealed = controller.reveal_key()
+
+        self.assertEqual(revealed, {"key": "bedrock-secret-demo", "expiresInSeconds": 15})
+
+    def test_reveal_rejects_unsafe_file_permissions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            credential = Path(directory) / "credential.json"
+            credential.write_text("{}", encoding="utf-8")
+            credential.chmod(0o644)
+            controller = ProofController(Path(directory) / "evidence", credential)
+
+            with self.assertRaisesRegex(RuntimeError, "mode 600"):
+                controller.reveal_key()
+
     def test_completed_status_is_sanitized(self):
         with tempfile.TemporaryDirectory() as directory:
             evidence = Path(directory)

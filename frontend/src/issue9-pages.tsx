@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react';
-import { getIssue9Proof, Issue9ProofStatus, startIssue9Proof } from './issue9-api';
+import { getIssue9Proof, Issue9ProofStatus, revealIssue9Key, startIssue9Proof } from './issue9-api';
+
+export const KEY_REVEAL_SECONDS = 15;
+export const nextRevealSeconds = (seconds: number) => Math.max(0, seconds - 1);
 
 function Badge({ children, tone = 'green' }: { children: React.ReactNode; tone?: 'green' | 'amber' | 'gray' }) {
   return <span className={`badge badge-${tone}`}>{children}</span>;
@@ -41,12 +44,43 @@ const proofSteps = [
 
 export function Issue9HomePage() {
   const { status, setStatus, error, setError } = useProofStatus();
+  const [revealedKey, setRevealedKey] = useState('');
+  const [revealSeconds, setRevealSeconds] = useState(0);
   const start = async () => {
     setError('');
     try { setStatus(await startIssue9Proof()); }
     catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not start the live proof.'); }
   };
   const proofUnavailable = status?.state === 'RUNNING' || status?.state === 'PASS';
+  useEffect(() => {
+    if (!revealedKey || revealSeconds <= 0) return;
+    const timer = window.setTimeout(() => {
+      if (revealSeconds === 1) {
+        setRevealedKey('');
+        setRevealSeconds(0);
+      } else {
+        setRevealSeconds(nextRevealSeconds);
+      }
+    }, 1000);
+    return () => window.clearTimeout(timer);
+  }, [revealedKey, revealSeconds]);
+
+  const reveal = async () => {
+    setError('');
+    setRevealedKey('');
+    try {
+      const result = await revealIssue9Key();
+      setRevealedKey(result.key);
+      setRevealSeconds(Math.min(result.expiresInSeconds, KEY_REVEAL_SECONDS));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not reveal the retained key.');
+    }
+  };
+  const copy = async () => {
+    if (!revealedKey) return;
+    try { await navigator.clipboard.writeText(revealedKey); }
+    catch { setError('Clipboard access failed. Select and copy the revealed key manually.'); }
+  };
 
   return (
     <div data-testid="issue9-proof">
@@ -58,8 +92,14 @@ export function Issue9HomePage() {
       <section className="issue9-control-grid">
         <article className="panel key-card issue9-key-card">
           <div className="key-card-top"><div><p className="eyebrow">Live credential</p><h2>Bedrock API key</h2></div><Badge tone={status?.key.deleted ? 'gray' : status?.key.created ? 'green' : 'amber'}>{status?.key.deleted ? 'Deleted' : status?.key.created ? 'Retained' : 'Not created'}</Badge></div>
-          <p className="card-copy">The real secret never enters browser storage, screenshots, URLs, or logs. The GUI receives only a SHA-256 fingerprint.</p>
-          <code data-testid="issue9-masked-key">{status?.key.masked || 'bedrock-********'}</code>
+          <p className="card-copy">Masked by default. Explicit reveal keeps the key in page memory for 15 seconds only; never capture it in screenshots.</p>
+          <code data-testid="issue9-masked-key">{revealedKey || status?.key.masked || 'bedrock-********'}</code>
+          <div className="key-actions">
+            <button className="button button-secondary compact" type="button" disabled={!status?.key.created || Boolean(revealedKey)} onClick={() => void reveal()}>Reveal key</button>
+            <button className="button button-primary compact" type="button" disabled={!revealedKey} onClick={() => void copy()}>Copy for Codex</button>
+            <small>{revealedKey ? `Masks in ${revealSeconds}s` : 'Secret is masked'}</small>
+          </div>
+          {revealedKey && <div className="notice compact-notice"><span>!</span><div><strong>Clipboard warning</strong><p>Your operating system may retain copied text after this page masks it.</p></div></div>}
           <dl><div><dt>AWS profile</dt><dd>amit (server-side)</dd></div><div><dt>Region</dt><dd>ap-southeast-1</dd></div></dl>
           <div className="notice compact-notice"><span>i</span><div><strong>Retained demo setup</strong><p>Successful resources use cleanup=review, TTL=30-09-26, and a 30-day key lifetime. Failed runs delete automatically.</p></div></div>
         </article>
