@@ -8,6 +8,9 @@ for script in "$repo_dir"/*.sh "$repo_dir"/scripts/*.sh; do
   /usr/bin/bash -n "$script"
 done
 
+AWS_PROFILE=profile-that-must-not-exist \
+  "$repo_dir/scripts/bedrock-api-key-poc.sh" --plan >/dev/null
+
 npm ci --prefix "$repo_dir/frontend"
 npm audit --audit-level=high --prefix "$repo_dir/frontend"
 npm run lint --prefix "$repo_dir/frontend"
