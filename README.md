@@ -43,6 +43,32 @@ Demo flow:
 This runs Bash syntax checks, frontend lint/tests/build, Python policy tests,
 CDK TypeScript build, npm audits, and whitespace checks. It makes no AWS calls.
 
+## Native Bedrock API key proof
+
+[Issue #9](https://github.com/mytestlab123/AgentCore/issues/9) adds a separate,
+CLI-only proof of governed developer access using an AWS-native Bedrock API
+key. It creates a one-day Bedrock service-specific credential on a disposable
+IAM user, proves Nova Lite ALLOW and Nova Pro DENY through AWS IAM, captures
+CloudTrail evidence, and then deletes both the credential and user.
+
+Review the fixed scope without making an AWS call:
+
+```bash
+AWS_PROFILE=amit ./scripts/bedrock-api-key-poc.sh --plan
+```
+
+The live mode is deliberately account- and caller-gated:
+
+```bash
+export EXPECTED_AWS_ACCOUNT='<exact-target-account-id>'
+export EXPECTED_AWS_CALLER_ARN='<exact-target-caller-arn>'
+AWS_PROFILE=amit ./scripts/bedrock-api-key-poc.sh --approve-run
+```
+
+The secret is held only in a mode-700 local evidence directory, is not placed
+in command arguments, and is removed before the script exits. See the
+[Issue #9 proof and developer guide](docs/ISSUE_9_BEDROCK_API_KEYS.md).
+
 With the local portal running, use its exact URL:
 
 ```bash

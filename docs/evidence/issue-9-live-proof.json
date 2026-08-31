@@ -1,0 +1,65 @@
+{
+  "proof": "native Amazon Bedrock API key governance",
+  "status": "PASS",
+  "capturedAt": "2026-08-31T21:23:24+08:00",
+  "region": "ap-southeast-1",
+  "credential": {
+    "type": "long-term Bedrock service-specific credential",
+    "ageDays": 1,
+    "generalAwsAccessKeysCreated": false,
+    "consoleLoginCreated": false
+  },
+  "clientResults": [
+    {
+      "decision": "ALLOW",
+      "model": "apac.amazon.nova-lite-v1:0",
+      "httpStatus": 200,
+      "inputTokens": 7,
+      "outputTokens": 6,
+      "requestIdSha256": "8551c0366f81730c5b19b1708059046eccb12660580920dcaad730bf60039031"
+    },
+    {
+      "decision": "DENY",
+      "enforcedBy": "AWS IAM",
+      "model": "apac.amazon.nova-pro-v1:0",
+      "httpStatus": 403,
+      "requestIdSha256": "5fd117119d4391dfaa57c29b6f02030e7fc15860f0602e93cfdaefb3dd0894fb"
+    }
+  ],
+  "cloudTrail": [
+    {
+      "eventTime": "2026-08-31T13:20:43Z",
+      "eventSource": "bedrock.amazonaws.com",
+      "eventName": "Converse",
+      "errorCode": "AccessDenied",
+      "modelId": null,
+      "bearerToken": null,
+      "actorType": "IAMUser",
+      "requestIdSha256": "5fd117119d4391dfaa57c29b6f02030e7fc15860f0602e93cfdaefb3dd0894fb"
+    },
+    {
+      "eventTime": "2026-08-31T13:20:43Z",
+      "eventSource": "bedrock.amazonaws.com",
+      "eventName": "Converse",
+      "errorCode": null,
+      "modelId": "apac.amazon.nova-lite-v1:0",
+      "bearerToken": true,
+      "actorType": "IAMUser",
+      "requestIdSha256": "8551c0366f81730c5b19b1708059046eccb12660580920dcaad730bf60039031"
+    }
+  ],
+  "cleanup": {
+    "credentialDeleted": true,
+    "iamUserDeleted": true,
+    "cleanupFailed": false
+  },
+  "redactions": [
+    "AWS account ID",
+    "caller ARN",
+    "IAM user name",
+    "credential ID",
+    "API key value",
+    "raw request IDs",
+    "response payload"
+  ]
+}
