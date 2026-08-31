@@ -28,5 +28,7 @@ Follow KISS and optimize for a 3-5 minute demo.
 
 - Use `./scripts/check.sh` for deterministic local checks.
 - Use `./scripts/browser-e2e.sh` for the bounded browser proof.
+- After a browser run, create or update `docs/TEST_PROOF.md` with the command,
+  result, evidence paths, and an honest browser-versus-backend proof boundary.
 - Keep tests focused on distinct POC behavior and honest mock/live labels.
 - Browser screenshots are supporting evidence, not proof of AWS or backend state.
