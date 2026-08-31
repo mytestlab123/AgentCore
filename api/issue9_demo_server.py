@@ -398,7 +398,7 @@ class Issue9Handler(BaseHTTPRequestHandler):
         if path == "/health":
             self._send_json(200, {
                 "status": "ok",
-                "mode": "ISSUE9_NATIVE_BEDROCK",
+                "mode": "ISSUE12_CODEX_BEDROCK_KEY",
                 "profileAlias": "amit",
                 "region": "ap-southeast-1",
             })
@@ -478,7 +478,7 @@ def main():
 
     signal.signal(signal.SIGINT, stop_server)
     signal.signal(signal.SIGTERM, stop_server)
-    print(f"Issue #9 backend ready at http://127.0.0.1:{port}", flush=True)
+    print(f"Issue #12 backend ready at http://127.0.0.1:{port}", flush=True)
     try:
         server.serve_forever()
     finally:
