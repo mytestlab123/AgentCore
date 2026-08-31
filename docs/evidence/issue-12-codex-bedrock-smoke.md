@@ -34,6 +34,17 @@ The bounded tests ran in temporary tmux session
 
 No successful inference or answer was produced. No further model was tried.
 
+## Codex2 token repair
+
+A later manual Codex session used `codex2`, which still contained the deleted
+Singapore credential and therefore returned `security token ... invalid`.
+The protected `.env` was backed up and repaired so `codex1`, `codex2`, and
+`codex_us` reference the one live service-specific credential; `nova` was
+preserved. A fresh isolated `codex2` run then passed token authentication and
+IAM authorization and reached the Ohio Mantle endpoint. It stopped only at the
+same account-level model-unavailable response. This proves the invalid-token
+defect is fixed, but successful model output remains blocked externally.
+
 ## Account availability discrepancy
 
 The read-only `GetFoundationModelAvailability` API reported Luna and Terra as:
