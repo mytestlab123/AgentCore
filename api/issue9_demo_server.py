@@ -58,7 +58,7 @@ def _masked_key(value):
 def _read_platform_config(path):
     try:
         if path.stat().st_mode & 0o077:
-            raise RuntimeError("PlatformAI configuration must have mode 600.")
+            raise RuntimeError("NOT CONFIGURED: PlatformAI configuration must have mode 600.")
         values = {}
         allowed = {"PLATFORM_API_KEY", "PLATFORM_API_BASE_URL", "PLATFORM_AI_MODEL", "PLATFORM_AI_REASONING_EFFORT"}
         for raw_line in path.read_text(encoding="utf-8").splitlines():
@@ -69,14 +69,14 @@ def _read_platform_config(path):
                 line = line[7:]
             name, separator, value = line.partition("=")
             if not separator or name.strip() not in allowed:
-                raise RuntimeError("PlatformAI configuration contains an unsupported setting.")
+                raise RuntimeError("NOT CONFIGURED: PlatformAI configuration contains an unsupported setting.")
             values[name.strip()] = value.strip().strip("'\"")
     except OSError as error:
-        raise RuntimeError("PlatformAI is not configured.") from error
+        raise RuntimeError("NOT CONFIGURED: PlatformAI is not configured.") from error
     if values.get("PLATFORM_API_BASE_URL", "").rstrip("/") != PLATFORM_BASE_URL:
-        raise RuntimeError("PlatformAI External endpoint is not configured.")
+        raise RuntimeError("NOT CONFIGURED: PlatformAI External endpoint is not configured.")
     if values.get("PLATFORM_AI_MODEL") != PLATFORM_MODEL or not values.get("PLATFORM_API_KEY"):
-        raise RuntimeError("PlatformAI GPT-5.6 Luna is not configured.")
+        raise RuntimeError("NOT CONFIGURED: PlatformAI GPT-5.6 Luna is not configured.")
     return values
 
 
@@ -427,6 +427,7 @@ class LiveAwsPlayground:
         self.profile = profile
         self.region = region
         self.platform_config = Path(platform_config)
+        self.platform_authorized = False
 
     def key_status(self):
         keys = {}
@@ -537,24 +538,33 @@ class LiveAwsPlayground:
             headers={"x-api-key": key, "content-type": "application/json", "accept": "application/json"},
             method="POST" if payload is not None else "GET",
         )
-        try:
-            with urllib.request.urlopen(request, timeout=60) as response:
-                return json.loads(response.read())
-        except urllib.error.HTTPError as error:
-            if error.code in {401, 403}:
-                raise RuntimeError("PlatformAI request was denied.") from error
-            if error.code == 404:
-                raise RuntimeError("PlatformAI model is not available.") from error
-            raise RuntimeError("PlatformAI request failed.") from error
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
-            raise RuntimeError("PlatformAI request failed.") from error
+        attempts = 2 if path == "models" else 1
+        for attempt in range(attempts):
+            try:
+                with urllib.request.urlopen(request, timeout=60) as response:
+                    return json.loads(response.read())
+            except urllib.error.HTTPError as error:
+                if error.code in {401, 403}:
+                    raise RuntimeError("DENIED: PlatformAI rejected the request.") from error
+                if error.code == 404:
+                    raise RuntimeError("NOT AVAILABLE: PlatformAI model is unavailable.") from error
+                if error.code in {429, 502, 503, 504} and attempt + 1 < attempts:
+                    continue
+                raise RuntimeError("ERROR: PlatformAI request failed.") from error
+            except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
+                if attempt + 1 < attempts:
+                    continue
+                raise RuntimeError("ERROR: PlatformAI request failed.") from error
+        raise RuntimeError("ERROR: PlatformAI request failed.")
 
     def _invoke_platform(self, prompt):
         config = _read_platform_config(self.platform_config)
         key = config["PLATFORM_API_KEY"]
-        catalog = self._platform_request("models", key)
-        if not any(item.get("id") == PLATFORM_MODEL for item in catalog.get("data", [])):
-            raise RuntimeError("PlatformAI GPT-5.6 Luna is not available.")
+        if not self.platform_authorized:
+            catalog = self._platform_request("models", key)
+            if not any(item.get("id") == PLATFORM_MODEL for item in catalog.get("data", [])):
+                raise RuntimeError("NOT AVAILABLE: PlatformAI GPT-5.6 Luna is unavailable.")
+            self.platform_authorized = True
         response = self._platform_request("responses", key, {
             "model": PLATFORM_MODEL,
             "input": prompt,
@@ -568,7 +578,7 @@ class LiveAwsPlayground:
             if content.get("type") == "output_text"
         )
         if response.get("status") != "completed" or not answer:
-            raise RuntimeError("PlatformAI returned an incomplete response.")
+            raise RuntimeError("ERROR: PlatformAI returned an incomplete response.")
         usage = response.get("usage", {})
         return answer, usage, response.get("status", "unknown")
 
@@ -577,23 +587,35 @@ class LiveAwsPlayground:
         if not prompt or len(prompt) > 500:
             raise RuntimeError("Use one public-safe prompt of 1 to 500 characters.")
         system = "Return concise GitHub-flavored Markdown. Do not claim tool or account access.\n\n"
+        results = []
         started = time.monotonic()
-        nova_answer, nova_usage, nova_stop = self._invoke("nova2", system + prompt)
-        nova_latency = round((time.monotonic() - started) * 1000)
+        try:
+            answer, usage, completion = self._invoke("nova2", system + prompt)
+            results.append({"provider": "Amazon Bedrock", "model": NOVA_MODELS["nova2"], "status": "ALLOW",
+                            "answer": answer, "latencyMs": round((time.monotonic() - started) * 1000),
+                            "inputTokens": usage.get("inputTokens"), "outputTokens": usage.get("outputTokens"),
+                            "completion": completion})
+        except RuntimeError:
+            results.append({"provider": "Amazon Bedrock", "model": NOVA_MODELS["nova2"], "status": "ERROR",
+                            "answer": "Amazon Bedrock request failed.", "latencyMs": round((time.monotonic() - started) * 1000),
+                            "inputTokens": None, "outputTokens": None, "completion": "error"})
         started = time.monotonic()
-        platform_answer, platform_usage, platform_status = self._invoke_platform(system + prompt)
-        platform_latency = round((time.monotonic() - started) * 1000)
-        return {"results": [{
-            "provider": "Amazon Bedrock", "model": NOVA_MODELS["nova2"], "status": "ALLOW",
-            "answer": nova_answer, "latencyMs": nova_latency,
-            "inputTokens": nova_usage.get("inputTokens"), "outputTokens": nova_usage.get("outputTokens"),
-            "completion": nova_stop,
-        }, {
-            "provider": "GovTech PlatformAI", "model": PLATFORM_MODEL, "status": "ALLOW",
-            "answer": platform_answer, "latencyMs": platform_latency,
-            "inputTokens": platform_usage.get("input_tokens"), "outputTokens": platform_usage.get("output_tokens"),
-            "completion": platform_status,
-        }]}
+        try:
+            answer, usage, completion = self._invoke_platform(system + prompt)
+            results.append({"provider": "GovTech PlatformAI", "model": PLATFORM_MODEL, "status": "ALLOW",
+                            "answer": answer, "latencyMs": round((time.monotonic() - started) * 1000),
+                            "inputTokens": usage.get("input_tokens"), "outputTokens": usage.get("output_tokens"),
+                            "completion": completion})
+        except RuntimeError as error:
+            message = str(error)
+            status = message.split(":", 1)[0] if ":" in message else "ERROR"
+            if status not in {"DENIED", "NOT AVAILABLE", "NOT CONFIGURED", "ERROR"}:
+                status = "ERROR"
+            results.append({"provider": "GovTech PlatformAI", "model": PLATFORM_MODEL, "status": status,
+                            "answer": message.split(":", 1)[-1].strip(),
+                            "latencyMs": round((time.monotonic() - started) * 1000),
+                            "inputTokens": None, "outputTokens": None, "completion": "error"})
+        return {"results": results}
 
     def run(self, body):
         key_name = body.get("model")

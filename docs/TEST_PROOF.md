@@ -23,6 +23,15 @@ Validation passed: 15 Python tests, frontend lint, 3 frontend tests,
 production build, dependency audit, Python compilation, diff check, and one
 live comparison. Playwright was not used.
 
+Intermittent-failure correction: `gtx check` confirmed the External endpoint,
+capability key, and exact Luna model remain authorized, and the exact GUI API
+request subsequently passed. The adapter now validates the model catalogue
+once per backend process, retries one transient catalogue failure, preserves
+the successful provider lane when the other fails, and reports stable
+`DENIED`, `NOT AVAILABLE`, `NOT CONFIGURED`, or `ERROR` states. Sixteen Python
+tests plus frontend lint/tests/build pass. Inference POSTs are not retried, to
+avoid duplicate usage. No credential was changed.
+
 ## Issue #12 governed AWS playground proof
 
 Last verified: 1 September 2026, 15:29 SGT

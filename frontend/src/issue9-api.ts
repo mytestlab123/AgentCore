@@ -101,7 +101,7 @@ export interface AwsPlaygroundResult {
 export interface CompareLaneResult {
   provider: 'Amazon Bedrock' | 'GovTech PlatformAI';
   model: string;
-  status: 'ALLOW';
+  status: 'ALLOW' | 'DENIED' | 'NOT AVAILABLE' | 'NOT CONFIGURED' | 'ERROR';
   answer: string;
   latencyMs: number;
   inputTokens?: number;
