@@ -23,6 +23,9 @@ AGENTCORE_CLI = os.environ.get(
     "AGENTCORE_CLI",
     "/home/user/.local/share/agentcore-cli/node_modules/.bin/agentcore",
 )
+CODEX_CLI = os.environ.get("CODEX_CLI", "/opt/agentcore-codex/node_modules/.bin/codex")
+CODEX_HOME = os.environ.get("CODEX_HOME", "/root/.codex")
+CODEX_WORKDIR = os.environ.get("CODEX_WORKDIR", "/opt/agentcore-codex")
 MODEL_ID = "global.amazon.nova-2-lite-v1:0"
 HARNESS_MAX_TOKENS = os.environ.get("AGENTCORE_MAX_TOKENS", "6000")
 PLATFORM_BASE_URL = os.environ.get("PLATFORM_API_BASE_URL", "https://api-public.ai.tech.gov.sg")
@@ -34,12 +37,12 @@ PLATFORM_MODELS = {
 }
 
 
-def _response(request_id: str, text: str) -> dict[str, Any]:
+def _response(request_id: str, text: str, model: str = "agentcore-nova-2-lite") -> dict[str, Any]:
     return {
         "id": request_id,
         "object": "chat.completion",
         "created": 0,
-        "model": "agentcore-nova-2-lite",
+        "model": model,
         "choices": [
             {
                 "index": 0,
@@ -50,14 +53,14 @@ def _response(request_id: str, text: str) -> dict[str, Any]:
     }
 
 
-def _stream_events(request_id: str, text: str) -> list[dict[str, Any]]:
+def _stream_events(request_id: str, text: str, model: str = "agentcore-nova-2-lite") -> list[dict[str, Any]]:
     """Return the two minimal chunks LibreChat expects for stream=true."""
     return [
         {
             "id": request_id,
             "object": "chat.completion.chunk",
             "created": 0,
-            "model": "agentcore-nova-2-lite",
+            "model": model,
             "choices": [
                 {
                     "index": 0,
@@ -70,7 +73,7 @@ def _stream_events(request_id: str, text: str) -> list[dict[str, Any]]:
             "id": request_id,
             "object": "chat.completion.chunk",
             "created": 0,
-            "model": "agentcore-nova-2-lite",
+            "model": model,
             "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
         },
     ]
@@ -112,6 +115,47 @@ def _platform_credentials(authorization: str | None) -> tuple[str, str]:
     if not key:
         raise ProviderAuthError("GovTechAI protected config is not available")
     return key, config.get("PLATFORM_API_BASE_URL", PLATFORM_BASE_URL)
+
+
+def invoke_codex(prompt: str) -> str:
+    if not os.path.isfile(CODEX_CLI) or not os.access(CODEX_CLI, os.X_OK):
+        raise RuntimeError("Codex CLI is not installed")
+    if not os.path.isfile(os.path.join(CODEX_HOME, "auth.json")):
+        raise ProviderAuthError("Codex subscription is not authenticated")
+    environment = os.environ.copy()
+    environment.update({"HOME": "/root", "CODEX_HOME": CODEX_HOME})
+    completed = subprocess.run(
+        [
+            CODEX_CLI,
+            "exec",
+            "--json",
+            "--ephemeral",
+            "--sandbox",
+            "read-only",
+            "--skip-git-repo-check",
+            "-C",
+            CODEX_WORKDIR,
+            prompt,
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=180,
+        env=environment,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError("Codex subscription invocation failed")
+    for line in completed.stdout.splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        item = event.get("item")
+        if event.get("type") == "item.completed" and isinstance(item, dict):
+            text = item.get("text")
+            if item.get("type") == "agent_message" and isinstance(text, str) and text.strip():
+                return text
+    raise RuntimeError("Codex subscription returned no text")
 
 
 def _platform_text(response: dict[str, Any]) -> str:
@@ -266,11 +310,17 @@ class Handler(BaseHTTPRequestHandler):
                 ]
             )
             return
+        if self.path == "/codex/v1/models":
+            self._models(
+                [{"id": "codex-subscription", "object": "model", "owned_by": "openai-chatgpt"}]
+            )
+            return
         self._send(404, _error("route not found"))
 
     def do_POST(self) -> None:  # noqa: N802
         is_platform = self.path == "/govtech/v1/chat/completions"
-        if self.path not in {"/v1/chat/completions", "/govtech/v1/chat/completions"}:
+        is_codex = self.path == "/codex/v1/chat/completions"
+        if self.path not in {"/v1/chat/completions", "/govtech/v1/chat/completions", "/codex/v1/chat/completions"}:
             self._send(404, _error("route not found"))
             return
         try:
@@ -282,6 +332,8 @@ class Handler(BaseHTTPRequestHandler):
                     str(payload.get("model", "")),
                     self.headers.get("authorization"),
                 )
+            elif is_codex:
+                text = invoke_codex(_user_prompt(payload))
             else:
                 text = invoke_harness(_user_prompt(payload))
         except (ValueError, json.JSONDecodeError) as exc:
@@ -294,10 +346,11 @@ class Handler(BaseHTTPRequestHandler):
             self._send(502, _error(str(exc)))
             return
         request_id = f"chatcmpl-{uuid.uuid4().hex}"
+        response_model = "codex-subscription" if is_codex else (str(payload.get("model", "")) if is_platform else "agentcore-nova-2-lite")
         if payload.get("stream") is True:
-            self._send_stream(request_id, text)
+            self._send_stream(request_id, text, response_model)
             return
-        self._send(200, _response(request_id, text))
+        self._send(200, _response(request_id, text, response_model))
 
     def log_message(self, *_args: Any) -> None:
         return

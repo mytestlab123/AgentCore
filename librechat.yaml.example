@@ -8,6 +8,13 @@ endpoints:
         default:
           - agentcore-nova-2-lite
       fetch: false
+    - name: Codex Subscription (EC2)
+      apiKey: local-poc-placeholder
+      baseURL: http://127.0.0.1:3081/codex/v1
+      models:
+        default:
+          - codex-subscription
+      fetch: false
     - name: GovTechAI
       apiKey: local-poc-placeholder
       baseURL: http://127.0.0.1:3081/govtech/v1

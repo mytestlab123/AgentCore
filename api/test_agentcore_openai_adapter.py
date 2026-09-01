@@ -102,6 +102,30 @@ class AdapterTests(unittest.TestCase):
         finally:
             os.unlink(config_path)
 
+    def test_codex_subscription_invocation_is_read_only_and_parses_message(self):
+        with tempfile.TemporaryDirectory() as home:
+            auth_path = os.path.join(home, "auth.json")
+            open(auth_path, "w", encoding="utf-8").close()
+            completed = type(
+                "Completed",
+                (),
+                {
+                    "returncode": 0,
+                    "stdout": json.dumps({
+                        "type": "item.completed",
+                        "item": {"type": "agent_message", "text": "ok"},
+                    }),
+                    "stderr": "",
+                },
+            )()
+            with patch.object(adapter, "CODEX_CLI", "/opt/codex"), patch.object(adapter, "CODEX_HOME", home), patch("os.path.isfile", side_effect=lambda path: path in {"/opt/codex", auth_path}), patch("os.access", return_value=True), patch("subprocess.run", return_value=completed) as run:
+                self.assertEqual(adapter.invoke_codex("hello"), "ok")
+            command = run.call_args.args[0]
+            self.assertIn("--sandbox", command)
+            self.assertIn("read-only", command)
+            self.assertIn("--ephemeral", command)
+            self.assertNotIn("--dangerously-bypass-approvals-and-sandbox", command)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -8,8 +8,13 @@ or
 
 `LibreChat -> OpenAI-compatible adapter -> GovTech PlatformAI`
 
+or
+
+`LibreChat -> OpenAI-compatible adapter -> EC2 Codex CLI -> ChatGPT subscription`
+
 The adapter is protocol translation only. It invokes the official AgentCore
-CLI Harness command and never receives AWS credentials from LibreChat.
+CLI Harness or the authenticated Codex CLI and never receives credentials from
+LibreChat.
 
 ## Adapter
 
@@ -28,12 +33,21 @@ The adapter exposes only:
 - `POST /v1/chat/completions`
 - `GET /govtech/v1/models`
 - `POST /govtech/v1/chat/completions`
+- `GET /codex/v1/models`
+- `POST /codex/v1/chat/completions`
 
 It accepts the latest user text, invokes one fixed Harness, and returns one
 OpenAI-compatible completion. When LibreChat requests `stream: true`, it
 returns minimal OpenAI-compatible SSE chunks and closes the stream after
 `[DONE]`. GovTechAI exposes only GPT-5.6 Luna, Azure Claude Haiku 4.5, and
 Gemini 3.5 Flash. Errors are explicit; no provider or model fallback exists.
+The experimental `Codex Subscription (EC2)` endpoint invokes the authenticated
+EC2 Codex CLI with `--sandbox read-only` and `--ephemeral`; it is not an
+OpenAI API endpoint and does not use `OPENAI_API_KEY`.
+
+To authenticate the EC2 CLI interactively, use `codex login --device-auth` in
+the dedicated remote tmux session. LibreChat only receives the CLI response;
+the ChatGPT session file stays on the EC2 host and is never sent to the GUI.
 
 ## LibreChat configuration
 
