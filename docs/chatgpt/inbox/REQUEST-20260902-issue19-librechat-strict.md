@@ -1,36 +1,49 @@
 # STRICT EXECUTION CONTRACT — Issue #19 LibreChat UI over AgentCore
 
-Status: IMPLEMENTATION HANDOFF
+Status: IMPLEMENTATION HANDOFF — V2
 Owner of architecture/acceptance: ChatGPT
 Implementation worker: Codex
 GitHub Issue: #19
+Draft PR: #20
 Target branch: `feature/issue-19-librechat-agentcore`
 
-## 0. Instruction priority
+## 0. Authority and instruction order
 
-This file is the implementation contract for Issue #19.
+For this milestone, use this order:
 
-Codex must implement this contract as written. If repository reality makes any MUST requirement impossible, stop implementation for that part and document the blocker in the existing PR. Do not silently substitute another architecture.
+1. current collaboration protocol: ChatGPT creates/owns the Issue + Draft PR contract;
+2. Issue #19: product decision, scope, architecture and acceptance intent;
+3. this file: exact implementation contract;
+4. current repository truth and existing code conventions.
 
-Do not create another issue, another implementation branch, or another PR for this milestone unless ChatGPT explicitly requests it.
+If two instructions materially conflict, **do not choose the easier interpretation**. Stop that implementation path and report the conflict/blocker in PR #20.
 
-## 1. Objective
+Codex must not create another issue, branch, or PR for this milestone unless ChatGPT explicitly requests it.
+
+Codex must not edit the architectural contract in this file to make an implementation fit. If the contract must change, report the blocker first and wait for ChatGPT/human review.
+
+---
+
+## 1. Objective — one golden path only
 
 Build the smallest working POC proving:
 
 ```text
 LibreChat
-  -> thin compatibility adapter
-  -> Amazon Bedrock AgentCore Harness
+  -> thin OpenAI-compatible protocol adapter
+  -> Amazon Bedrock AgentCore InvokeHarness
+  -> AgentCore Harness
   -> Nova 2 Lite
   -> response visible in LibreChat
 ```
 
-LibreChat is only the UI/conversation shell.
+Success requires **one real public-safe prompt** through that exact path.
 
-AgentCore Harness remains the managed agent/runtime authority.
+No tool call is required.
 
-AWS IAM remains the authorization boundary.
+No enterprise platform work is required.
+
+---
 
 ## 2. Architecture invariant — MUST NOT DRIFT
 
@@ -46,7 +59,7 @@ LibreChat
   v
 Thin protocol adapter
   |
-  | InvokeHarness / official AgentCore-supported invocation path
+  | AgentCore InvokeHarness
   v
 Amazon Bedrock AgentCore Harness
   |
@@ -54,43 +67,229 @@ Amazon Bedrock AgentCore Harness
 Nova 2 Lite
 ```
 
-The compatibility adapter exists only because LibreChat and AgentCore Harness expose different interfaces.
+Roles:
 
-The adapter MUST NOT become an agent, orchestration framework, model router, policy engine, or alternate backend.
+- **LibreChat**: UI/conversation shell only.
+- **Adapter**: request/response protocol translation only.
+- **AgentCore Harness**: managed agent/runtime execution authority.
+- **Nova 2 Lite**: model for this MVP.
+- **AWS IAM**: final AWS authorization boundary.
 
-## 3. MUST requirements
+### Important clarification: Python/Node is allowed only as an adapter
 
-1. Use LibreChat as the reusable chat UI.
-2. Use Amazon Bedrock AgentCore Harness for the actual managed agent/model execution path.
-3. Reuse the proven Harness knowledge/pattern from Issue #17 / PR #18 rather than replacing it.
-4. Use Nova 2 Lite for the MVP unless a current AWS/account limitation makes this impossible; any substitution must be explicitly documented in the PR before implementation proceeds.
-5. Keep the adapter minimal: translate LibreChat/OpenAI-compatible request and response semantics to/from the official AgentCore Harness invocation path.
-6. One user prompt from LibreChat must result in one real AgentCore Harness-backed response rendered in LibreChat.
-7. Preserve server-side/AWS authorization. UI model selection must never grant model permission.
-8. Keep credentials and AWS identifiers out of Git.
-9. Add deterministic local/offline validation where practical for adapter request/response mapping.
-10. Document exact run steps and exact proof collected.
+The implementation language is not the architecture.
 
-## 4. MUST NOT requirements
+A tiny Python or Node service is acceptable **only** if it performs protocol translation and AgentCore Harness invocation.
+
+It MUST NOT:
+
+- become an LLM backend;
+- call Bedrock Runtime directly for the chat path;
+- implement the agent/model loop;
+- select alternate providers;
+- add tools/orchestration/policy logic.
+
+This distinction exists specifically to prevent the type of drift where a required managed runtime is silently replaced by a custom Python LLM implementation.
+
+---
+
+## 3. Technical integration basis
+
+The intended compatibility boundary is deliberately narrow:
+
+### LibreChat side
+
+Use a LibreChat **custom OpenAI-compatible endpoint** configured in `librechat.yaml`.
+
+For the MVP:
+
+- expose only one endpoint/model label such as `AgentCore / Nova 2 Lite`;
+- prefer an explicit model list with model fetching disabled if practical;
+- do not expose extra providers/models merely because LibreChat supports them;
+- do not place AWS credentials in LibreChat configuration;
+- streaming is optional for the first proof.
+
+Current LibreChat custom-endpoint documentation:
+
+- https://www.librechat.ai/docs/quick_start/custom_endpoints
+- https://www.librechat.ai/docs/configuration/librechat_yaml/object_structure/custom_endpoint
+
+### Adapter side
+
+Expose only the minimum OpenAI-compatible chat-completions surface LibreChat needs.
+
+The adapter must translate that request into the official AgentCore Harness invocation path.
+
+It does not need to emulate the full OpenAI API.
+
+If `models.fetch: false` avoids a `/models` implementation, prefer that smaller shape.
+
+### AgentCore side
+
+The backend operation must be AgentCore **`InvokeHarness`** / the official AgentCore-supported Harness invocation path.
+
+Reference:
+
+- https://docs.aws.amazon.com/bedrock-agentcore/latest/APIReference/API_InvokeHarness.html
+
+Do not reinterpret “AgentCore-backed” as “call Bedrock Runtime directly.”
+
+---
+
+## 4. Existing proof to reuse — PR #18
+
+Issue #17 / merged PR #18 already proved:
+
+```text
+preflight
+  -> create temporary execution role
+  -> create Harness
+  -> READY
+  -> invoke Nova 2 Lite
+  -> verify answer
+  -> delete Harness
+  -> delete role
+  -> independently verify cleanup
+```
+
+Review before coding:
+
+- Issue #19;
+- Draft PR #20;
+- merged PR #18;
+- `docs/HARNESS_MVP_GUIDE.md`;
+- `scripts/harness-mvp.sh`;
+- repository `AGENTS.md`;
+- existing check/test conventions.
+
+Do not duplicate the entire Harness lifecycle if reuse is possible.
+
+### Explicitly authorized lifecycle variation
+
+Interactive LibreChat needs the Harness to remain available briefly. That is **not** an architecture deviation for this milestone.
+
+The approved temporary demo lifecycle is:
+
+```text
+preflight
+  -> create temporary Harness/role using proven pattern
+  -> wait for READY
+  -> start adapter + LibreChat
+  -> ONE real LibreChat prompt
+  -> capture sanitized proof
+  -> stop local services
+  -> delete Harness/role
+  -> verify cleanup
+```
+
+Do not turn this into a persistent service or always-on AWS deployment.
+
+---
+
+## 5. MUST requirements
+
+1. Use LibreChat as the reusable UI.
+2. Use one fixed AgentCore-backed custom endpoint/model label.
+3. Use AgentCore Harness for the actual managed execution path.
+4. Use AgentCore `InvokeHarness` / official Harness invocation path from the adapter.
+5. Reuse the proven Harness pattern from #17 / PR #18 where practical.
+6. Use Nova 2 Lite unless ChatGPT explicitly approves a documented substitution.
+7. Keep the adapter protocol-only.
+8. One LibreChat prompt must result in one real Harness-backed Nova 2 Lite response rendered in LibreChat.
+9. Keep AWS credentials/identifiers out of LibreChat and Git.
+10. Use server-side/local AWS credential-chain/profile access only where the adapter/Harness lifecycle requires it.
+11. Failure must be explicit and must not silently fall back to another provider/model.
+12. Add focused local/offline tests for request/response translation where practical.
+13. Add an anti-drift check over new runtime code.
+14. Add sanitized proof and exact run/cleanup steps.
+15. Delete disposable AWS resources and independently verify cleanup.
+
+---
+
+## 6. MUST NOT requirements
 
 The implementation MUST NOT:
 
 - call Bedrock Runtime `Converse`, `ConverseStream`, `InvokeModel`, or `InvokeModelWithResponseStream` directly for the LibreChat chat path;
-- create a custom Python or Node agent loop;
-- replace AgentCore Harness with Strands, LangChain, custom orchestration, or another framework;
-- introduce LiteLLM for this MVP;
-- add AgentCore Gateway, MCP tools, EC2, Inspector, SSM, remediation, RAG, memory, browser, code interpreter, multi-agent logic, or autonomous AWS writes;
-- give LibreChat broad AWS credentials;
-- fork LibreChat unless a small, documented blocker proves configuration/adapter integration is impossible;
-- redesign the existing AgentCore platform/UI architecture;
+- create a custom Python/Node LLM or agent loop;
+- replace Harness with Strands, LangChain, custom orchestration, or another framework;
+- introduce LiteLLM;
+- add AgentCore Gateway or MCP;
+- add EC2, Inspector, SSM, remediation, or AWS mutation workflows;
+- add RAG/vector DB;
+- add AgentCore/LibreChat memory work;
+- add browser/code interpreter;
+- add multi-agent behavior;
+- give LibreChat AWS credentials;
+- silently switch provider/model;
+- expose a broad model catalog;
+- fork LibreChat unless a documented blocker proves configuration/adapter integration impossible;
 - build production SSO, multi-tenancy, billing, chargeback, EKS, or enterprise deployment;
-- silently fall back to a different provider/model when AgentCore invocation fails.
+- redesign the existing AgentCore platform;
+- create a second implementation PR for the same milestone.
 
-## 5. Explicit anti-drift check
+---
 
-Before declaring implementation complete, inspect all newly added adapter/runtime code.
+## 7. Exact MVP demo
 
-The new LibreChat integration must not contain a direct model invocation path using concepts/functions equivalent to:
+The complete proof should remain approximately:
+
+```text
+1. Preflight identity/config.
+2. Create temporary Harness/role using PR #18 pattern.
+3. Wait for Harness READY.
+4. Start minimal adapter locally.
+5. Start LibreChat locally.
+6. LibreChat shows one endpoint: AgentCore / Nova 2 Lite.
+7. Send one public-safe prompt.
+8. Adapter translates the request and invokes AgentCore Harness.
+9. Harness/Nova 2 Lite returns the answer.
+10. LibreChat renders the answer.
+11. Capture sanitized evidence.
+12. Stop local services.
+13. Delete Harness/role.
+14. Independently verify cleanup.
+```
+
+Suggested prompt:
+
+> Explain in five bullets what Amazon Bedrock AgentCore Harness manages for an AI agent.
+
+A correct non-streaming response is sufficient. Do not spend the milestone implementing streaming unless it is trivial and does not broaden scope.
+
+---
+
+## 8. Expected implementation shape
+
+Prefer fewer files and configuration over new framework code.
+
+Approximate shape only:
+
+```text
+integration/librechat/
+  librechat.yaml.example       # one custom endpoint, no secrets
+  README.md                    # exact local run steps
+
+adapter/ or integration/librechat/adapter/
+  minimal handler/server       # chat-completions translation only
+  focused tests
+
+scripts/
+  small demo lifecycle helper  # only if it genuinely reduces operator error
+
+docs/
+  ISSUE19_LIBRECHAT_PROOF.md   # sanitized end-to-end evidence
+```
+
+Do not add layers merely to match this example.
+
+---
+
+## 9. Required anti-drift validation
+
+Before implementation is considered complete, inspect all new runtime/adapter code and prove that the LibreChat execution path does not directly invoke Bedrock models.
+
+Prohibited runtime concepts for the LibreChat path include equivalents of:
 
 ```text
 bedrock-runtime
@@ -99,108 +298,138 @@ converse_stream
 invoke_model
 invoke_model_with_response_stream
 custom LLM loop
+provider fallback
 ```
 
-Those strings may appear in documentation explaining prohibited paths, tests, or comments, but not as the execution path for the LibreChat POC.
+These words may appear in this contract, documentation, or tests that assert prohibition. They must not represent the actual chat execution path.
 
-The expected backend execution boundary is AgentCore Harness invocation.
-
-## 6. MVP scope — intentionally tiny
-
-The complete demo should be approximately:
+Expected positive boundary:
 
 ```text
-1. Start LibreChat locally.
-2. Start the minimal adapter locally.
-3. Configure one LibreChat endpoint: "AgentCore / Nova 2 Lite".
-4. Send one simple public-safe prompt.
-5. Adapter invokes the existing/proven AgentCore Harness path.
-6. Response is returned to LibreChat and rendered normally.
-7. Capture sanitized proof.
-8. Cleanup any disposable AgentCore resources if this implementation creates them.
+LibreChat request
+  -> adapter
+  -> InvokeHarness
 ```
 
-Suggested prompt:
-
-> Explain in five bullets what Amazon Bedrock AgentCore Harness manages for an AI agent.
-
-No tool call is required in this milestone.
-
-## 7. Prefer reuse over invention
-
-Review before coding:
-
-- Issue #19
-- merged PR #18
-- `docs/HARNESS_MVP_GUIDE.md`
-- `scripts/harness-mvp.sh`
-- repository `AGENTS.md`
-- existing project check/test conventions
-
-Do not duplicate the complete Harness lifecycle implementation if a smaller reusable integration boundary is possible.
-
-If persistent Harness availability is required for interactive LibreChat use, document that as a deliberate deviation from PR #18's disposable lifecycle and implement only the smallest safe lifecycle needed for this POC.
-
-## 8. Expected implementation shape
-
-Exact filenames may change based on repository truth, but the implementation should remain approximately this small:
+Also test one negative case:
 
 ```text
-librechat/ or integration/librechat/
-  librechat.yaml.example       # endpoint configuration, no secrets
-  README.md                    # local run instructions
-
-adapter/
-  minimal server/handler       # protocol translation only
-  focused tests                # request/response mapping
-
-scripts/
-  one start/demo helper        # only if useful
-
-docs/
-  ISSUE19_LIBRECHAT_PROOF.md   # sanitized evidence and final result
+Harness unavailable / invocation fails
+  -> adapter returns explicit error
+  -> LibreChat shows failure
+  -> NO direct Bedrock/provider fallback
 ```
 
-Do not add layers merely to match this example structure. Fewer files are preferable if clear.
+---
 
-## 9. PR execution rules for Codex
+## 10. Evidence required
 
-Codex must continue the existing Draft PR created for this issue.
+Add sanitized public-safe proof showing enough evidence to conclude, without inference:
 
-During implementation:
+1. LibreChat sent the test prompt to the configured custom endpoint.
+2. The adapter received the request.
+3. The backend operation used AgentCore Harness invocation.
+4. The Harness used the intended Nova 2 Lite configuration.
+5. The real model response returned to LibreChat.
+6. The negative no-fallback test behaved correctly.
+7. Disposable Harness/IAM resources were absent after cleanup.
 
-1. Read this contract before editing code.
-2. Inspect repository truth before deciding filenames.
-3. Keep changes bounded to Issue #19.
-4. Push commits only to `feature/issue-19-librechat-agentcore`.
-5. Update the existing Draft PR description/checklist as evidence becomes available.
-6. Do not mark the PR ready for review until all MUST and MUST-NOT checks have been verified.
-7. Do not merge the PR.
-8. Do not close Issue #19 merely because a response appeared in the UI.
-9. If architecture must change, stop and request ChatGPT review in the PR instead of improvising.
+Do not commit:
 
-## 10. Acceptance criteria
+- account IDs;
+- ARNs;
+- credentials/tokens;
+- private endpoints;
+- raw AWS service responses containing identifiers;
+- sensitive local paths beyond already-established public-safe conventions.
 
-The PR is implementation-complete only when all are true:
+Private/raw evidence may remain outside Git following the PR #18 evidence pattern.
 
-- [ ] LibreChat runs as a separate UI/service.
-- [ ] A single configured LibreChat endpoint represents the AgentCore-backed path.
+---
+
+## 11. Blocker / architecture-deviation protocol
+
+If any MUST requirement appears impossible or materially wrong, Codex must **stop that implementation path before coding an alternative** and add this to PR #20:
+
+```text
+BLOCKER
+
+Expected contract:
+<required architecture/technology>
+
+Repository/AWS reality:
+<what was actually discovered>
+
+Why the contract cannot currently be met:
+<short evidence-based explanation>
+
+Smallest options:
+1. <option>
+2. <option>
+
+Architecture changed: NO
+Alternative implementation started: NO
+Decision required: ChatGPT / human
+```
+
+A workaround is not permission to change architecture.
+
+No new branch or replacement PR should be created for the blocker.
+
+---
+
+## 12. PR execution rules for Codex
+
+Codex must:
+
+1. read Issue #19, PR #20 and this contract before editing code;
+2. inspect repository truth;
+3. push only to `feature/issue-19-librechat-agentcore`;
+4. continue the existing Draft PR #20;
+5. keep the diff bounded to the one golden path;
+6. run focused validation and repository checks;
+7. add sanitized implementation/proof notes to the existing PR/branch;
+8. report blockers rather than substituting architecture.
+
+Codex must **not**:
+
+- rewrite the Issue scope;
+- weaken this contract;
+- create another Issue/branch/PR for this milestone;
+- mark PR #20 ready for review;
+- merge PR #20;
+- close Issue #19.
+
+**ChatGPT/human review is the gate that changes the PR from Draft/implementation to ready/mergeable work.**
+
+---
+
+## 13. Acceptance checklist
+
+- [ ] LibreChat runs separately as the UI/service.
+- [ ] Exactly one focused AgentCore-backed custom endpoint/model is configured for the proof.
 - [ ] One real prompt travels from LibreChat to the thin adapter.
-- [ ] The adapter invokes AgentCore Harness, not Bedrock Runtime directly.
-- [ ] AgentCore Harness invokes Nova 2 Lite (or an explicitly reviewed substitute).
-- [ ] The real response is rendered in LibreChat.
+- [ ] Adapter is protocol-only.
+- [ ] Adapter invokes AgentCore Harness, not Bedrock Runtime directly.
+- [ ] Harness invokes Nova 2 Lite, or a substitution was explicitly approved before implementation.
+- [ ] The real response renders in LibreChat.
+- [ ] Streaming was not made a blocker.
 - [ ] No custom agent/model orchestration loop was added.
-- [ ] No LiteLLM/Gateway/MCP/tooling/RAG/memory scope was introduced.
-- [ ] No AWS credentials or private identifiers are committed.
-- [ ] Failure does not silently fall back to another model/provider.
+- [ ] No LiteLLM/Gateway/MCP/tool/RAG/memory/enterprise scope was introduced.
+- [ ] LibreChat contains no AWS credentials.
+- [ ] No secrets/private AWS identifiers are committed.
+- [ ] Harness failure produces an explicit error with no provider/model fallback.
 - [ ] Focused tests/checks pass.
-- [ ] Sanitized proof documents the exact tested path.
-- [ ] Disposable resources are cleaned up or their deliberate retention is explicitly documented.
+- [ ] Sanitized proof demonstrates the exact path.
+- [ ] Disposable AWS resources are cleaned up and absence is verified.
+- [ ] PR remains Draft pending ChatGPT/human architecture review.
 
-## 11. Definition of done
+---
 
-A reviewer can inspect code plus proof and conclude, without inference:
+## 14. Definition of done
 
-> LibreChat is only the user experience. The implementation crosses a thin compatibility boundary into Amazon Bedrock AgentCore Harness. AgentCore remains the runtime/agent authority, Nova 2 Lite is the model, and AWS IAM remains the authorization boundary.
+A reviewer can inspect the final diff plus proof and conclude, without inference:
 
-Anything materially broader is outside Issue #19 and requires a new ChatGPT-approved milestone.
+> LibreChat is the user experience only. A thin compatibility adapter translates LibreChat's OpenAI-compatible chat request into Amazon Bedrock AgentCore `InvokeHarness`. AgentCore Harness remains the managed runtime/agent authority, Nova 2 Lite provides the model response, AWS IAM remains the authorization boundary, and no alternate model path is silently used.
+
+Anything materially broader requires a new ChatGPT-created Issue + Draft PR milestone.
