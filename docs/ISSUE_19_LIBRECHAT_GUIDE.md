@@ -1,8 +1,12 @@
 # Issue #19 LibreChat POC
 
-This is a single-path demo:
+This is a small demo with two fixed provider paths:
 
 `LibreChat -> OpenAI-compatible adapter -> AgentCore Harness -> Nova 2 Lite`
+
+or
+
+`LibreChat -> OpenAI-compatible adapter -> GovTech PlatformAI`
 
 The adapter is protocol translation only. It invokes the official AgentCore
 CLI Harness command and never receives AWS credentials from LibreChat.
@@ -22,18 +26,23 @@ The adapter exposes only:
 
 - `GET /v1/models`
 - `POST /v1/chat/completions`
+- `GET /govtech/v1/models`
+- `POST /govtech/v1/chat/completions`
 
 It accepts the latest user text, invokes one fixed Harness, and returns one
 OpenAI-compatible completion. When LibreChat requests `stream: true`, it
 returns minimal OpenAI-compatible SSE chunks and closes the stream after
-`[DONE]`. Errors are explicit; no provider or model fallback exists.
+`[DONE]`. GovTechAI exposes only GPT-5.6 Luna, Azure Claude Haiku 4.5, and
+Gemini 3.5 Flash. Errors are explicit; no provider or model fallback exists.
 
 ## LibreChat configuration
 
 Copy `librechat.yaml.example` to LibreChat's `librechat.yaml` and mount it
 using the normal LibreChat configuration path. Set a local placeholder API key
-in LibreChat; it is not an AWS key. Keep the adapter reachable only on the
-private host or SSM tunnel.
+in LibreChat; it is not an AWS or GovTech key. The live EC2 adapter reads the
+GovTech key only from `/etc/agentcore-issue19/platformai.env`, owned by root
+with mode `600`; it is never committed, logged, or returned to the browser.
+Keep the adapter reachable only on the private host or SSM tunnel.
 
 For this POC, set `ENDPOINTS=custom` in LibreChat's `.env` before restarting.
 This keeps the built-in OpenAI endpoint out of the selector, so a new chat

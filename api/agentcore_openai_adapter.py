@@ -2,7 +2,7 @@
 
 The adapter only translates chat-completions requests into the official
 AgentCore CLI Harness invocation. It never calls Bedrock Runtime directly and
-does not implement model, tool, or provider selection.
+does not implement arbitrary model, tool, or provider selection.
 """
 
 from __future__ import annotations
@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import urllib.error
+import urllib.request
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -22,6 +24,13 @@ AGENTCORE_CLI = os.environ.get(
     "/home/user/.local/share/agentcore-cli/node_modules/.bin/agentcore",
 )
 MODEL_ID = "global.amazon.nova-2-lite-v1:0"
+PLATFORM_BASE_URL = os.environ.get("PLATFORM_API_BASE_URL", "https://api-public.ai.tech.gov.sg")
+PLATFORM_CONFIG = os.environ.get("PLATFORM_CONFIG", "/etc/agentcore-issue19/platformai.env")
+PLATFORM_MODELS = {
+    "gpt-5.6-luna",
+    "azure.claude-haiku-4-5",
+    "gemini-3.5-flash",
+}
 
 
 def _response(request_id: str, text: str) -> dict[str, Any]:
@@ -68,6 +77,86 @@ def _stream_events(request_id: str, text: str) -> list[dict[str, Any]]:
 
 def _error(message: str) -> dict[str, Any]:
     return {"error": {"message": message, "type": "agentcore_adapter_error"}}
+
+
+class ProviderAuthError(RuntimeError):
+    """Raised when no protected GovTech provider key is available."""
+
+
+def _platform_config() -> dict[str, str]:
+    try:
+        mode = os.stat(PLATFORM_CONFIG).st_mode & 0o777
+        if mode != 0o600:
+            raise ProviderAuthError("GovTechAI protected config must be mode 600")
+        values: dict[str, str] = {}
+        with open(PLATFORM_CONFIG, encoding="utf-8") as handle:
+            for line in handle:
+                if "=" not in line or line.lstrip().startswith("#"):
+                    continue
+                name, value = line.rstrip("\n").split("=", 1)
+                if name in {"PLATFORM_API_KEY", "PLATFORM_API_BASE_URL", "PLATFORM_AI_MODEL"}:
+                    values[name] = value.strip().strip('"').strip("'")
+        return values
+    except FileNotFoundError:
+        return {}
+
+
+def _platform_credentials(authorization: str | None) -> tuple[str, str]:
+    if authorization and authorization.lower().startswith("bearer "):
+        key = authorization[7:].strip()
+        if key and key != "local-poc-placeholder":
+            return key, PLATFORM_BASE_URL
+    config = _platform_config()
+    key = config.get("PLATFORM_API_KEY", "")
+    if not key:
+        raise ProviderAuthError("GovTechAI protected config is not available")
+    return key, config.get("PLATFORM_API_BASE_URL", PLATFORM_BASE_URL)
+
+
+def _platform_text(response: dict[str, Any]) -> str:
+    text = "".join(
+        content.get("text", "")
+        for item in response.get("output", [])
+        for content in item.get("content", [])
+        if content.get("type") == "output_text"
+    )
+    if not text:
+        raise RuntimeError("GovTechAI returned no response text")
+    return text
+
+
+def invoke_platform(prompt: str, model: str, authorization: str | None) -> str:
+    if model not in PLATFORM_MODELS:
+        raise RuntimeError("GovTechAI model is not in the approved allowlist")
+    key, base_url = _platform_credentials(authorization)
+    request_payload: dict[str, Any] = {
+        "model": model,
+        "input": prompt,
+        "max_output_tokens": 700,
+    }
+    if model == "gpt-5.6-luna":
+        request_payload["reasoning"] = {"effort": "low"}
+    request = urllib.request.Request(
+        f"{base_url.rstrip('/')}/platform/models/v1/responses",
+        data=json.dumps(request_payload).encode("utf-8"),
+        headers={
+            "x-api-key": key,
+            "content-type": "application/json",
+            "accept": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            return _platform_text(json.loads(response.read()))
+    except urllib.error.HTTPError as error:
+        if error.code in {401, 403}:
+            raise RuntimeError("GovTechAI rejected the key or model") from error
+        if error.code == 404:
+            raise RuntimeError("GovTechAI model is unavailable") from error
+        raise RuntimeError("GovTechAI request failed") from error
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
+        raise RuntimeError("GovTechAI request failed") from error
 
 
 def _user_prompt(payload: dict[str, Any]) -> str:
@@ -151,34 +240,52 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.flush()
         self.close_connection = True
 
+    def _models(self, models: list[dict[str, str]]) -> None:
+        self._send(200, {"object": "list", "data": models})
+
     def do_GET(self) -> None:  # noqa: N802
         if self.path == "/v1/models":
-            self._send(
-                200,
-                {
-                    "object": "list",
-                    "data": [
-                        {
-                            "id": "agentcore-nova-2-lite",
-                            "object": "model",
-                            "owned_by": "agentcore",
-                        }
-                    ],
-                },
+            self._models(
+                [
+                    {
+                        "id": "agentcore-nova-2-lite",
+                        "object": "model",
+                        "owned_by": "agentcore",
+                    }
+                ]
+            )
+            return
+        if self.path == "/govtech/v1/models":
+            self._models(
+                [
+                    {"id": model, "object": "model", "owned_by": "govtechai"}
+                    for model in sorted(PLATFORM_MODELS)
+                ]
             )
             return
         self._send(404, _error("route not found"))
 
     def do_POST(self) -> None:  # noqa: N802
-        if self.path != "/v1/chat/completions":
+        is_platform = self.path == "/govtech/v1/chat/completions"
+        if self.path not in {"/v1/chat/completions", "/govtech/v1/chat/completions"}:
             self._send(404, _error("route not found"))
             return
         try:
             length = int(self.headers.get("content-length", "0"))
             payload = json.loads(self.rfile.read(length))
-            text = invoke_harness(_user_prompt(payload))
+            if is_platform:
+                text = invoke_platform(
+                    _user_prompt(payload),
+                    str(payload.get("model", "")),
+                    self.headers.get("authorization"),
+                )
+            else:
+                text = invoke_harness(_user_prompt(payload))
         except (ValueError, json.JSONDecodeError) as exc:
             self._send(400, _error(str(exc)))
+            return
+        except ProviderAuthError as exc:
+            self._send(401, _error(str(exc)))
             return
         except (RuntimeError, subprocess.TimeoutExpired) as exc:
             self._send(502, _error(str(exc)))
