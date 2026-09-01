@@ -9,9 +9,10 @@ region=${AWS_REGION:-ap-southeast-1}
 expected_account=${EXPECTED_AWS_ACCOUNT:-}
 expected_caller_arn=${EXPECTED_AWS_CALLER_ARN:-}
 model_id=global.amazon.nova-2-lite-v1:0
-harness_name=AgentCoreHarnessMvpR1
-role_name=AgentCoreBedrockAgentCoreHarnessMvpR1
-policy_name=AgentCoreHarnessMvpPolicy
+harness_name=${HARNESS_NAME:-AgentCoreHarnessMvpR1}
+role_name=${HARNESS_ROLE_NAME:-AgentCoreBedrockAgentCoreHarnessMvpR1}
+policy_name=${HARNESS_POLICY_NAME:-AgentCoreHarnessMvpPolicy}
+created_tag=${HARNESS_CREATED_TAG:-$(date '+%Y-%m-%d')}
 ttl=${HARNESS_TTL:-$(date -d '+1 day' '+%d-%m-%y')}
 run_id=$(date '+%Y%m%dT%H%M%S%z')
 evidence_dir=${EVIDENCE_DIR:-$HOME/.AGENTS-temp/AgentCore/harness-mvp/$run_id}
@@ -20,10 +21,11 @@ agentcore_cli=${AGENTCORE_CLI:-$HOME/.local/share/agentcore-cli/node_modules/.bi
 
 usage() {
   cat <<'USAGE'
-Usage: harness-mvp.sh [--plan|--approve-run|--cleanup]
+Usage: harness-mvp.sh [--plan|--approve-run|--prepare|--cleanup]
 
 --plan         Show the fixed MVP scope. No AWS calls.
 --approve-run  Create, invoke, prove, delete, and verify cleanup.
+--prepare      Create and wait for READY; leave resources for one UI prompt.
 --cleanup      Delete the fixed Harness and IAM role if they exist.
 
 Required for AWS modes:
@@ -33,7 +35,7 @@ USAGE
 
 print_plan() {
   cat <<PLAN
-Issue #17 AgentCore Harness MVP
+Issue #19 AgentCore Harness MVP
 Profile alias: $profile
 Region: $region
 Harness: $harness_name
@@ -53,7 +55,7 @@ case "$mode" in
     print_plan
     exit 0
     ;;
-  --approve-run|--cleanup) ;;
+  --approve-run|--prepare|--cleanup) ;;
   -h|--help)
     usage
     exit 0
@@ -196,7 +198,7 @@ aws iam create-role --role-name "$role_name" \
   --assume-role-policy-document "file://$trust_file" \
   --tags \
     Key=Name,Value="$role_name" Key=dev,Value=amit Key=project,Value=AgentCore \
-    Key=created,Value=2026-09-01 Key=tools,Value=cdx Key=environment,Value=dev \
+    Key=created,Value="$created_tag" Key=tools,Value=cdx Key=environment,Value=dev \
     Key=owner,Value=amit Key=version,Value=r1 Key=TTL,Value="$ttl" \
     Key=purpose,Value=harness-mvp Key=phase,Value=harness-mvp Key=cleanup,Value=delete \
   >"$private_dir/create-role.json"
@@ -206,13 +208,14 @@ aws iam put-role-policy --role-name "$role_name" --policy-name "$policy_name" \
 sleep 10
 
 jq -n --arg name "$harness_name" --arg role "$role_arn" --arg model "$model_id" \
-  --arg ttl "$ttl" \
+  --arg ttl "$ttl" --arg created "$created_tag" \
   '{harnessName:$name,executionRoleArn:$role,
     environment:{agentCoreRuntimeEnvironment:{lifecycleConfiguration:{idleRuntimeSessionTimeout:600,maxLifetime:600},networkConfiguration:{networkMode:"PUBLIC"}}},
     model:{bedrockModelConfig:{modelId:$model,maxTokens:128,temperature:0,topP:1,apiFormat:"converse_stream",additionalParams:{}}},
     systemPrompt:[{text:"Follow the user instruction exactly. Do not use tools."}],
+    tools:[],skills:[],allowedTools:[],
     memory:{disabled:{}},maxIterations:1,maxTokens:128,timeoutSeconds:120,
-    tags:{Name:$name,dev:"amit",project:"AgentCore",created:"2026-09-01",tools:"cdx",environment:"dev",owner:"amit",version:"r1",TTL:$ttl,purpose:"harness-mvp",phase:"harness-mvp",cleanup:"delete"}}' \
+    tags:{Name:$name,dev:"amit",project:"AgentCore",created:$created,tools:"cdx",environment:"dev",owner:"amit",version:"r1",TTL:$ttl,purpose:"harness-mvp",phase:"harness-mvp",cleanup:"delete"}}' \
   >"$create_file"
 aws bedrock-agentcore-control create-harness --cli-input-json "file://$create_file" \
   --output json >"$private_dir/create-harness.json"
@@ -235,6 +238,16 @@ done
 if [[ $status != READY ]]; then
   echo "ERROR: Harness did not become READY; status=$status" >&2
   exit 1
+fi
+
+if [[ $mode == --prepare ]]; then
+  jq -n --arg harness "$harness_arn" --arg id "$harness_id" --arg model "$model_id" \
+    '{status:"READY",harnessArn:$harness,harnessId:$id,model:$model,cleanup:"pending"}' \
+    >"$evidence_dir/PREPARED.json"
+  chmod -R go-rwx "$evidence_dir"
+  echo "HARNESS_READY_ARN=$harness_arn"
+  echo "Harness prepared; run --cleanup with the same names after one UI prompt."
+  exit 0
 fi
 
 session_id=$(uuidgen)

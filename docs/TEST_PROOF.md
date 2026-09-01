@@ -188,6 +188,26 @@ Private local AWS evidence:
 
 ## CloudTrail propagation behavior
 
+## ChatGPT subscription GUI bridge
+
+The EC2 Codex CLI was authenticated with ChatGPT device authorization. The
+adapter exposes `gpt-5.6-luna` at `/codex/v1/models` and runs each
+request with `--sandbox read-only`, `--ephemeral`, and a non-repository working
+directory. A direct E2E request returned `CODEX_GUI_E2E_PASS`, and the LibreChat
+startup log loaded `Codex Subscription (EC2)`. This is a custom CLI bridge, not
+an OpenAI API-key integration; the subscription auth file remains root-only on
+EC2.
+
+## Issue #19 LibreChat + GovTechAI proof
+
+The EC2 adapter was deployed with a root-owned mode-600 GovTech configuration
+at `/etc/agentcore-issue19/platformai.env`. A temporary encrypted SSM handoff
+was checksum-verified against `/home/user/.config/gtx/config.env`; the transfer
+parameter and temporary IAM policy were deleted afterward. Direct local adapter
+requests returned HTTP 200 and `MODEL_PROOF_OK` for GPT-5.6 Luna, Azure Claude
+Haiku 4.5, and Gemini 3.5 Flash. The adapter exposes these three models at
+`/govtech/v1/models` and never returns the key to LibreChat.
+
 CloudTrail event history is asynchronous. The GUI reports the core proof PASS
 as soon as HTTP 200 ALLOW, HTTP 403 IAM DENY, and credential lifecycle are
 verified. Audit is shown separately as PENDING or VERIFIED. The latest browser
