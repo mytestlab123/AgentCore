@@ -89,13 +89,28 @@ export interface NovaKeysStatus {
 
 export interface AwsPlaygroundResult {
   decision: 'ALLOW' | 'DENY';
-  tool: 'ec2' | 'inspector' | 'ssm';
+  tool: 'ec2' | 'inspector' | 'ssm' | 'text';
   model: string;
   records: Record<string, string>[];
   answer: string;
   inputTokens: number;
   outputTokens: number;
   stopReason: string;
+}
+
+export interface CompareLaneResult {
+  provider: 'Amazon Bedrock' | 'GovTech PlatformAI';
+  model: string;
+  status: 'ALLOW' | 'DENIED' | 'NOT AVAILABLE' | 'NOT CONFIGURED' | 'ERROR';
+  answer: string;
+  latencyMs: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  completion: string;
+}
+
+export interface CompareResult {
+  results: CompareLaneResult[];
 }
 
 async function liveRequest<T>(path: string, init?: RequestInit): Promise<T> {
@@ -118,6 +133,20 @@ export function runAwsPlayground(model: 'nova2' | 'nova_pro', tool: 'ec2' | 'ins
   return liveRequest('/aws-playground', {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ model, tool, prompt }),
+  });
+}
+
+export function runPlatformTool(model: 'gpt-5.6-luna' | 'azure.claude-haiku-4-5' | 'gemini-3.5-flash', tool: 'ec2' | 'inspector' | 'ssm', prompt: string): Promise<AwsPlaygroundResult> {
+  return liveRequest('/platform-tool', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ model, tool, prompt }),
+  });
+}
+
+export function compareModels(prompt: string): Promise<CompareResult> {
+  return liveRequest('/compare', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ prompt }),
   });
 }
 

@@ -108,7 +108,7 @@ AWS_PROFILE=amit AWS_REGION=ap-southeast-1 \
   ./dev-issue9.sh --approve-live
 ```
 
-Open `http://127.0.0.1:5174/`. The Project view starts or reuses the retained
+Open `http://127.0.0.1:3333/`. The Project view starts or reuses the retained
 proof, Playground shows the real ALLOW and DENY outcomes, and Logs shows audit
 state. The browser never receives the AWS secret.
 

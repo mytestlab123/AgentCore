@@ -68,7 +68,7 @@ AWS_PROFILE=amit AWS_REGION=ap-southeast-1 \
   ./dev-issue9.sh --approve-live
 ```
 
-Open `http://127.0.0.1:5174/` and use **Generate key and run proof**. The full
+Open `http://127.0.0.1:3333/` and use **Generate key and run proof**. The full
 secret remains in a mode-600 ignored file. Issue #12 adds an explicit
 loopback-only reveal/copy action that holds the secret in page memory for 15
 seconds and then masks it. CloudTrail propagation is asynchronous and does
@@ -100,7 +100,7 @@ AWS_PROFILE=amit AWS_REGION=ap-southeast-1 \
 With the local portal running, use its exact URL:
 
 ```bash
-APP_URL=http://127.0.0.1:5174/ \
+APP_URL=http://127.0.0.1:3333/ \
   EXPECTED_API_BASE_URL=http://127.0.0.1:9019 \
   ./scripts/browser-e2e.sh
 ```
@@ -142,14 +142,14 @@ The script writes only the API URL to untracked `frontend/.env.local`. Restart
 the portal in live mode:
 
 ```bash
-AGENTCORE_PORT=5174 ./dev-live.sh
+AGENTCORE_PORT=3333 ./dev-live.sh
 ```
 
 Then run the same browser proof while allowing only the exact deployed API:
 
 ```bash
 EXPECTED_API_BASE_URL="$(sed -n 's/^VITE_API_BASE_URL=//p' frontend/.env.local)" \
-  APP_URL=http://localhost:5174/ ./scripts/browser-e2e.sh
+  APP_URL=http://localhost:3333/ ./scripts/browser-e2e.sh
 ```
 
 The live API contract also has a secret-safe runner. `--full` requires Bedrock

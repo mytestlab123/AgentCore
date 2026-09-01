@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 
+import csv
 import hashlib
 import json
 import os
 import signal
 import subprocess
 import threading
+import time
+import urllib.error
+import urllib.request
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -19,6 +23,8 @@ DEFAULT_EVIDENCE_ROOT = Path.home() / ".AGENTS-temp" / "AgentCore" / "issue9-gui
 DEFAULT_RETAINED_CREDENTIAL = Path.home() / ".AGENTS-temp" / "AgentCore" / "issue9-retained" / "credential.json"
 DEFAULT_CODEX_RETAINED_DIR = Path.home() / ".AGENTS-temp" / "AgentCore" / "issue12-codex-key"
 DEFAULT_KEY_ENV = Path("/home/user/git/awsops/.env")
+DEFAULT_GTX_CONFIG = Path.home() / ".config" / "gtx" / "config.env"
+INSPECTOR_SAMPLE = REPO_DIR / "docs" / "demo-data" / "seccop-inspector-sanitized.csv"
 LIVE_DEMO_ROLE = "agentcore-live-demo-readonly-role-r1"
 ALLOWED_MODEL = "apac.amazon.nova-lite-v1:0"
 RESTRICTED_MODEL = "apac.amazon.nova-pro-v1:0"
@@ -26,6 +32,10 @@ NOVA_MODELS = {
     "nova2": "global.amazon.nova-2-lite-v1:0",
     "nova_pro": "apac.amazon.nova-pro-v1:0",
 }
+PLATFORM_MODEL = "gpt-5.6-luna"
+PLATFORM_CLAUDE_MODEL = "azure.claude-haiku-4-5"
+PLATFORM_GEMINI_MODEL = "gemini-3.5-flash"
+PLATFORM_BASE_URL = "https://api-public.ai.tech.gov.sg"
 
 
 def _read_env_value(path, name):
@@ -47,6 +57,31 @@ def _read_env_value(path, name):
 
 def _masked_key(value):
     return f"bedrock-{hashlib.sha256(value.encode('utf-8')).hexdigest()[:12]}********" if value else None
+
+
+def _read_platform_config(path):
+    try:
+        if path.stat().st_mode & 0o077:
+            raise RuntimeError("NOT CONFIGURED: PlatformAI configuration must have mode 600.")
+        values = {}
+        allowed = {"PLATFORM_API_KEY", "PLATFORM_API_BASE_URL", "PLATFORM_AI_MODEL", "PLATFORM_AI_REASONING_EFFORT"}
+        for raw_line in path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("export "):
+                line = line[7:]
+            name, separator, value = line.partition("=")
+            if not separator or name.strip() not in allowed:
+                raise RuntimeError("NOT CONFIGURED: PlatformAI configuration contains an unsupported setting.")
+            values[name.strip()] = value.strip().strip("'\"")
+    except OSError as error:
+        raise RuntimeError("NOT CONFIGURED: PlatformAI is not configured.") from error
+    if values.get("PLATFORM_API_BASE_URL", "").rstrip("/") != PLATFORM_BASE_URL:
+        raise RuntimeError("NOT CONFIGURED: PlatformAI External endpoint is not configured.")
+    if values.get("PLATFORM_AI_MODEL") != PLATFORM_MODEL or not values.get("PLATFORM_API_KEY"):
+        raise RuntimeError("NOT CONFIGURED: PlatformAI GPT-5.6 Luna is not configured.")
+    return values
 
 
 def _read_json(path):
@@ -391,10 +426,12 @@ class CodexKeyController:
 
 
 class LiveAwsPlayground:
-    def __init__(self, key_env=DEFAULT_KEY_ENV, profile="amit", region="ap-southeast-1"):
+    def __init__(self, key_env=DEFAULT_KEY_ENV, profile="amit", region="ap-southeast-1", platform_config=DEFAULT_GTX_CONFIG):
         self.key_env = Path(key_env)
         self.profile = profile
         self.region = region
+        self.platform_config = Path(platform_config)
+        self.platform_authorized_models = None
 
     def key_status(self):
         keys = {}
@@ -453,17 +490,14 @@ class LiveAwsPlayground:
                     })
             return records[:20]
         if tool == "inspector":
-            payload = self._aws(["inspector2", "list-findings", "--max-results", "20"], env)
-            return [{
-                "title": finding.get("title", "Untitled finding"),
-                "severity": finding.get("severity", "UNKNOWN"),
-                "status": finding.get("status", "UNKNOWN"),
-                "resourceType": (finding.get("resources") or [{}])[0].get("type", "UNKNOWN"),
-                "vulnerabilityId": finding.get("packageVulnerabilityDetails", {}).get("vulnerabilityId", "Not available"),
-                "inspectorScore": finding.get("inspectorScore", "Not available"),
-                "exploitAvailable": finding.get("exploitAvailable", "UNKNOWN"),
-                "fixAvailable": finding.get("fixAvailable", "UNKNOWN"),
-            } for finding in payload.get("findings", [])]
+            try:
+                with INSPECTOR_SAMPLE.open(encoding="utf-8", newline="") as sample:
+                    records = list(csv.DictReader(sample))
+            except OSError as error:
+                raise RuntimeError("Inspector demo sample is unavailable.") from error
+            if len(records) != 50:
+                raise RuntimeError("Inspector demo sample must contain exactly 50 findings.")
+            return records
         if tool == "ssm":
             completed = subprocess.run(
                 ["aws", "ssm", "describe-parameters", "--max-results", "1", "--region", self.region,
@@ -476,6 +510,14 @@ class LiveAwsPlayground:
                 raise RuntimeError("SSM deny proof did not return AccessDenied.")
             return []
         raise RuntimeError("Unknown AWS tool.")
+
+    def _evidence_text(self, tool, records):
+        if tool == "inspector":
+            try:
+                return INSPECTOR_SAMPLE.read_text(encoding="utf-8")
+            except OSError as error:
+                raise RuntimeError("Inspector demo sample is unavailable.") from error
+        return json.dumps(records)
 
     def _invoke(self, key_name, prompt):
         key = _read_env_value(self.key_env, key_name)
@@ -498,19 +540,146 @@ class LiveAwsPlayground:
         usage = response.get("usage", {})
         return text, usage, response.get("stopReason", "unknown")
 
+    def _platform_request(self, path, key, payload=None):
+        data = json.dumps(payload).encode("utf-8") if payload is not None else None
+        request = urllib.request.Request(
+            f"{PLATFORM_BASE_URL}/platform/models/v1/{path}", data=data,
+            headers={"x-api-key": key, "content-type": "application/json", "accept": "application/json"},
+            method="POST" if payload is not None else "GET",
+        )
+        attempts = 2 if path == "models" else 1
+        for attempt in range(attempts):
+            try:
+                with urllib.request.urlopen(request, timeout=60) as response:
+                    return json.loads(response.read())
+            except urllib.error.HTTPError as error:
+                if error.code in {401, 403}:
+                    raise RuntimeError("DENIED: PlatformAI rejected the request.") from error
+                if error.code == 404:
+                    raise RuntimeError("NOT AVAILABLE: PlatformAI model is unavailable.") from error
+                if error.code in {429, 502, 503, 504} and attempt + 1 < attempts:
+                    continue
+                raise RuntimeError("ERROR: PlatformAI request failed.") from error
+            except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
+                if attempt + 1 < attempts:
+                    continue
+                raise RuntimeError("ERROR: PlatformAI request failed.") from error
+        raise RuntimeError("ERROR: PlatformAI request failed.")
+
+    def _invoke_platform(self, prompt, model=PLATFORM_MODEL):
+        config = _read_platform_config(self.platform_config)
+        key = config["PLATFORM_API_KEY"]
+        if self.platform_authorized_models is None:
+            catalog = self._platform_request("models", key)
+            self.platform_authorized_models = {item.get("id") for item in catalog.get("data", [])}
+        if model not in self.platform_authorized_models:
+            raise RuntimeError(f"NOT AVAILABLE: PlatformAI model {model} is unavailable.")
+        last_answer = ""
+        last_usage = {}
+        last_status = "unknown"
+        retry_models = {PLATFORM_MODEL, PLATFORM_GEMINI_MODEL}
+        attempts = 2 if model in retry_models else 1
+        for attempt in range(attempts):
+            concise_prefix = "Keep the complete answer below 180 words. " if attempt else ""
+            payload = {
+                "model": model,
+                "input": concise_prefix + prompt,
+                "max_output_tokens": 6000 if attempt else (3000 if model in retry_models else 700),
+            }
+            if model == PLATFORM_MODEL:
+                payload["reasoning"] = {"effort": "low"}
+            response = self._platform_request("responses", key, payload)
+            last_answer = "".join(
+                content.get("text", "")
+                for item in response.get("output", [])
+                for content in item.get("content", [])
+                if content.get("type") == "output_text"
+            )
+            last_usage = response.get("usage", {})
+            last_status = response.get("status", "unknown")
+            if last_status == "completed" and last_answer:
+                return last_answer, last_usage, last_status
+        if last_answer:
+            return last_answer, last_usage, last_status
+        raise RuntimeError("ERROR: PlatformAI returned no response text.")
+
+    def platform_tool(self, body):
+        prompt = str(body.get("prompt", "")).strip()
+        model = body.get("model")
+        tool = body.get("tool")
+        if model not in {PLATFORM_MODEL, PLATFORM_CLAUDE_MODEL, PLATFORM_GEMINI_MODEL} or tool not in {"ec2", "inspector", "ssm"}:
+            raise RuntimeError("Use one approved PlatformAI model and AWS tool.")
+        if not prompt or len(prompt) > 500:
+            raise RuntimeError("Use a prompt of 1 to 500 characters.")
+        records = self._source(tool, {} if tool == "inspector" else self._role_env())
+        if tool == "ssm":
+            return {"decision": "DENY", "tool": tool, "model": model, "records": [],
+                    "answer": "AWS IAM explicitly denied SSM Parameter Store. No parameter names or values were returned.",
+                    "inputTokens": 0, "outputTokens": 0, "stopReason": "policy_denied", "latencyMs": 0}
+        external_records = records
+        if tool == "ec2":
+            external_records = [{**{key: value for key, value in record.items() if key != "instanceAlias"},
+                                 "instanceAlias": f"instance-{index}"}
+                                for index, record in enumerate(records, start=1)]
+        started = time.monotonic()
+        answer, usage, completion = self._invoke_platform(
+            "Return concise GitHub-flavored Markdown. Use only the supplied evidence records. "
+            "Do not claim tool or account access.\n\n" + prompt + "\n\nEvidence records:\n" + self._evidence_text(tool, external_records),
+            model,
+        )
+        return {"decision": "ALLOW", "tool": tool, "model": model,
+                "records": external_records, "answer": answer,
+                "inputTokens": usage.get("input_tokens", 0), "outputTokens": usage.get("output_tokens", 0),
+                "stopReason": completion, "latencyMs": round((time.monotonic() - started) * 1000)}
+
+    def compare(self, body):
+        prompt = str(body.get("prompt", "")).strip()
+        if not prompt or len(prompt) > 500:
+            raise RuntimeError("Use one public-safe prompt of 1 to 500 characters.")
+        system = "Return concise GitHub-flavored Markdown. Do not claim tool or account access.\n\n"
+        results = []
+        started = time.monotonic()
+        try:
+            answer, usage, completion = self._invoke("nova2", system + prompt)
+            results.append({"provider": "Amazon Bedrock", "model": NOVA_MODELS["nova2"], "status": "ALLOW",
+                            "answer": answer, "latencyMs": round((time.monotonic() - started) * 1000),
+                            "inputTokens": usage.get("inputTokens"), "outputTokens": usage.get("outputTokens"),
+                            "completion": completion})
+        except RuntimeError:
+            results.append({"provider": "Amazon Bedrock", "model": NOVA_MODELS["nova2"], "status": "ERROR",
+                            "answer": "Amazon Bedrock request failed.", "latencyMs": round((time.monotonic() - started) * 1000),
+                            "inputTokens": None, "outputTokens": None, "completion": "error"})
+        started = time.monotonic()
+        try:
+            answer, usage, completion = self._invoke_platform(system + prompt)
+            results.append({"provider": "GovTech PlatformAI", "model": PLATFORM_MODEL, "status": "ALLOW",
+                            "answer": answer, "latencyMs": round((time.monotonic() - started) * 1000),
+                            "inputTokens": usage.get("input_tokens"), "outputTokens": usage.get("output_tokens"),
+                            "completion": completion})
+        except RuntimeError as error:
+            message = str(error)
+            status = message.split(":", 1)[0] if ":" in message else "ERROR"
+            if status not in {"DENIED", "NOT AVAILABLE", "NOT CONFIGURED", "ERROR"}:
+                status = "ERROR"
+            results.append({"provider": "GovTech PlatformAI", "model": PLATFORM_MODEL, "status": status,
+                            "answer": message.split(":", 1)[-1].strip(),
+                            "latencyMs": round((time.monotonic() - started) * 1000),
+                            "inputTokens": None, "outputTokens": None, "completion": "error"})
+        return {"results": results}
+
     def run(self, body):
         key_name = body.get("model")
         tool = body.get("tool")
         question = str(body.get("prompt", "")).strip()[:500]
         if key_name not in NOVA_MODELS or tool not in {"ec2", "inspector", "ssm"}:
             raise RuntimeError("Choose one supported model and AWS tool.")
-        records = self._source(tool, self._role_env())
+        records = self._source(tool, {} if tool == "inspector" else self._role_env())
         if tool == "ssm":
             return {"decision": "DENY", "tool": tool, "model": NOVA_MODELS[key_name],
                     "records": [], "answer": "AWS IAM explicitly denied SSM Parameter Store. No parameter names or values were returned.",
                     "inputTokens": 0, "outputTokens": 0, "stopReason": "policy_denied"}
         default_question = "Summarize the most important operational facts in three concise bullets."
-        prompt = (question or default_question) + "\nUse only this sanitized AWS data:\n" + json.dumps(records)
+        prompt = (question or default_question) + "\nUse only these evidence records:\n" + self._evidence_text(tool, records)
         answer, usage, stop_reason = self._invoke(key_name, prompt)
         return {"decision": "ALLOW", "tool": tool, "model": NOVA_MODELS[key_name],
                 "records": records, "answer": answer,
@@ -526,9 +695,11 @@ class Issue9Handler(BaseHTTPRequestHandler):
         "http://localhost:5173",
         "http://localhost:5174",
         "http://localhost:5175",
+        "http://localhost:3333",
         "http://127.0.0.1:5173",
         "http://127.0.0.1:5174",
         "http://127.0.0.1:5175",
+        "http://127.0.0.1:3333",
     }
 
     def _send_json(self, status, body):
@@ -554,7 +725,7 @@ class Issue9Handler(BaseHTTPRequestHandler):
         if path == "/health":
             self._send_json(200, {
                 "status": "ok",
-                "mode": "ISSUE12_CODEX_BEDROCK_KEY",
+                "mode": "ISSUE15_MODEL_COMPARE",
                 "profileAlias": "amit",
                 "region": "ap-southeast-1",
             })
@@ -618,6 +789,26 @@ class Issue9Handler(BaseHTTPRequestHandler):
             except (RuntimeError, json.JSONDecodeError, KeyError, TypeError) as error:
                 self._send_json(409, {"message": str(error)})
             return
+        if path == "/compare":
+            try:
+                content_length = int(self.headers.get("content-length", "0"))
+                if content_length < 1 or content_length > 1024:
+                    raise RuntimeError("Invalid compare request.")
+                body = json.loads(self.rfile.read(content_length))
+                self._send_json(200, self.live_playground.compare(body))
+            except (RuntimeError, json.JSONDecodeError, KeyError, TypeError) as error:
+                self._send_json(409, {"message": str(error)})
+            return
+        if path == "/platform-tool":
+            try:
+                content_length = int(self.headers.get("content-length", "0"))
+                if content_length < 1 or content_length > 1024:
+                    raise RuntimeError("Invalid PlatformAI tool request.")
+                body = json.loads(self.rfile.read(content_length))
+                self._send_json(200, self.live_playground.platform_tool(body))
+            except (RuntimeError, json.JSONDecodeError, KeyError, TypeError) as error:
+                self._send_json(409, {"message": str(error)})
+            return
         if path != "/proof":
             self._send_json(404, {"message": "Not found"})
             return
@@ -655,7 +846,7 @@ def main():
 
     signal.signal(signal.SIGINT, stop_server)
     signal.signal(signal.SIGTERM, stop_server)
-    print(f"Issue #12 backend ready at http://127.0.0.1:{port}", flush=True)
+    print(f"Issue #15 backend ready at http://127.0.0.1:{port}", flush=True)
     try:
         server.serve_forever()
     finally:
