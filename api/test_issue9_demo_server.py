@@ -44,6 +44,7 @@ class Issue9DemoStatusTests(unittest.TestCase):
         self.assertEqual(result["decision"], "DENY")
         self.assertEqual(result["records"], [])
         self.assertEqual(result["inputTokens"], 0)
+        self.assertEqual(result["stopReason"], "policy_denied")
         self.assertIn("No parameter names or values", result["answer"])
 
     def test_codex_key_status_is_masked_and_model_scoped(self):

@@ -48,6 +48,15 @@ and fix availability. A direct live call through Nova 2 Lite returned ALLOW,
 20 sanitized findings, and a non-empty top-10 summary. Finding ARNs, account
 identifiers, and resource IDs were not supplied to the model or response.
 
+Markdown readability follow-up: Nova responses are rendered as safe
+GitHub-flavored Markdown without raw HTML support. Headings, lists, code, and
+tables are styled inside the existing dark result panel. The backend now asks
+for grounded Markdown, limits output to 900 tokens, and returns Bedrock's real
+stop reason so the GUI labels a response Complete or Truncated. A live Nova 2
+Inspector run returned a Markdown table, 439 output tokens, and `end_turn`
+(Complete). Dependency audit, unit tests, lint, frontend tests, and production
+build passed. Playwright was not used.
+
 ## Bottom line
 
 Issue #9 passed the dark-mode GUI journey at `http://127.0.0.1:5174/` using

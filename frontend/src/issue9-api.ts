@@ -95,6 +95,7 @@ export interface AwsPlaygroundResult {
   answer: string;
   inputTokens: number;
   outputTokens: number;
+  stopReason: string;
 }
 
 async function liveRequest<T>(path: string, init?: RequestInit): Promise<T> {

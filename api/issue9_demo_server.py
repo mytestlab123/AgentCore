@@ -481,8 +481,9 @@ class LiveAwsPlayground:
         key = _read_env_value(self.key_env, key_name)
         model = NOVA_MODELS[key_name]
         body = json.dumps({
+            "system": [{"text": "You are an AWS operations report assistant. Answer only from the supplied sanitized AWS records. Do not claim shell, CLI, tool, account, or environment access. If the question is unrelated to the selected records, say so briefly. Return concise GitHub-flavored Markdown."}],
             "messages": [{"role": "user", "content": [{"text": prompt}]}],
-            "inferenceConfig": {"maxTokens": 500, "temperature": 0.1},
+            "inferenceConfig": {"maxTokens": 900, "temperature": 0.1},
         })
         completed = subprocess.run([
             "curl", "--silent", "--show-error", "--fail-with-body", "--max-time", "60",
@@ -495,7 +496,7 @@ class LiveAwsPlayground:
         response = json.loads(completed.stdout)
         text = response["output"]["message"]["content"][0]["text"]
         usage = response.get("usage", {})
-        return text, usage
+        return text, usage, response.get("stopReason", "unknown")
 
     def run(self, body):
         key_name = body.get("model")
@@ -507,13 +508,14 @@ class LiveAwsPlayground:
         if tool == "ssm":
             return {"decision": "DENY", "tool": tool, "model": NOVA_MODELS[key_name],
                     "records": [], "answer": "AWS IAM explicitly denied SSM Parameter Store. No parameter names or values were returned.",
-                    "inputTokens": 0, "outputTokens": 0}
+                    "inputTokens": 0, "outputTokens": 0, "stopReason": "policy_denied"}
         default_question = "Summarize the most important operational facts in three concise bullets."
         prompt = (question or default_question) + "\nUse only this sanitized AWS data:\n" + json.dumps(records)
-        answer, usage = self._invoke(key_name, prompt)
+        answer, usage, stop_reason = self._invoke(key_name, prompt)
         return {"decision": "ALLOW", "tool": tool, "model": NOVA_MODELS[key_name],
                 "records": records, "answer": answer,
-                "inputTokens": usage.get("inputTokens", 0), "outputTokens": usage.get("outputTokens", 0)}
+                "inputTokens": usage.get("inputTokens", 0), "outputTokens": usage.get("outputTokens", 0),
+                "stopReason": stop_reason}
 
 
 class Issue9Handler(BaseHTTPRequestHandler):
