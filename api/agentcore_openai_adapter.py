@@ -173,6 +173,7 @@ def invoke_codex(prompt: str, model: str = CODEX_DEFAULT_MODEL) -> str:
     )
     if completed.returncode != 0:
         raise RuntimeError("Codex subscription invocation failed")
+    messages: list[str] = []
     for line in completed.stdout.splitlines():
         try:
             event = json.loads(line)
@@ -182,7 +183,9 @@ def invoke_codex(prompt: str, model: str = CODEX_DEFAULT_MODEL) -> str:
         if event.get("type") == "item.completed" and isinstance(item, dict):
             text = item.get("text")
             if item.get("type") == "agent_message" and isinstance(text, str) and text.strip():
-                return text
+                messages.append(text)
+    if messages:
+        return messages[-1]
     raise RuntimeError("Codex subscription returned no text")
 
 

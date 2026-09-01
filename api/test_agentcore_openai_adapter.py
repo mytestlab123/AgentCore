@@ -66,10 +66,16 @@ class AdapterTests(unittest.TestCase):
                 (),
                 {
                     "returncode": 0,
-                    "stdout": json.dumps({
-                        "type": "item.completed",
-                        "item": {"type": "agent_message", "text": "ok"},
-                    }),
+                    "stdout": "\n".join([
+                        json.dumps({
+                            "type": "item.completed",
+                            "item": {"type": "agent_message", "text": "intermediate"},
+                        }),
+                        json.dumps({
+                            "type": "item.completed",
+                            "item": {"type": "agent_message", "text": "ok"},
+                        }),
+                    ]),
                 },
             )()
             with patch.object(adapter, "CODEX_CLI", "/opt/codex"), patch.object(adapter, "CODEX_HOME", home), patch("os.path.isfile", side_effect=lambda path: path in {"/opt/codex", auth_path}), patch("os.access", return_value=True), patch("subprocess.run", return_value=completed) as run:

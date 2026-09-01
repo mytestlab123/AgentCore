@@ -36,6 +36,10 @@ The adapter exposes only:
 - `GET /codex/v1/models`
 - `POST /codex/v1/chat/completions`
 
+Codex may emit progress messages before a tool call and a final answer. The
+adapter returns the last completed assistant message so the GUI receives the
+answer rather than progress text such as “I’ll verify…”.
+
 It accepts the latest user text, invokes one fixed Harness, and returns one
 OpenAI-compatible completion. When LibreChat requests `stream: true`, it
 returns minimal OpenAI-compatible SSE chunks and closes the stream after
