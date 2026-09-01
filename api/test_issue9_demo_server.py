@@ -27,6 +27,25 @@ class Issue9DemoStatusTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "Unknown Nova"):
             LiveAwsPlayground().reveal_key("unknown")
 
+    def test_ssm_deny_never_invokes_model_or_returns_records(self):
+        class DeniedPlayground(LiveAwsPlayground):
+            def _role_env(self):
+                return {}
+
+            def _source(self, tool, env):
+                self.assert_tool = tool
+                return []
+
+            def _invoke(self, key_name, prompt):
+                raise AssertionError("The model must not run for the SSM deny proof")
+
+        result = DeniedPlayground().run({"model": "nova2", "tool": "ssm", "prompt": "list secrets"})
+
+        self.assertEqual(result["decision"], "DENY")
+        self.assertEqual(result["records"], [])
+        self.assertEqual(result["inputTokens"], 0)
+        self.assertIn("No parameter names or values", result["answer"])
+
     def test_codex_key_status_is_masked_and_model_scoped(self):
         with tempfile.TemporaryDirectory() as directory:
             retained = Path(directory)

@@ -34,6 +34,13 @@ Result: **PASS**. Browser appearance was not revalidated in this change; the
 HTTP journey, AWS authorization boundary, model responses, lint, unit tests,
 and production build were validated.
 
+Follow-up correction: the Playground now clears stale results whenever the
+model, tool, or prompt changes. The SSM selection replaces the free-form prompt
+with a fixed authorization check, skips Bedrock inference, and returns only the
+deterministic AWS IAM denial with zero records and zero tokens. The Issue #12
+navigation no longer presents the legacy Logs page. This correction was also
+validated without Playwright.
+
 ## Bottom line
 
 Issue #9 passed the dark-mode GUI journey at `http://127.0.0.1:5174/` using
