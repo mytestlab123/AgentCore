@@ -43,7 +43,8 @@ returns minimal OpenAI-compatible SSE chunks and closes the stream after
 Gemini 3.5 Flash. Errors are explicit; no provider or model fallback exists.
 The experimental `Codex Subscription (EC2)` endpoint invokes the authenticated
 EC2 Codex CLI with `--sandbox read-only` and `--ephemeral`; it is not an
-OpenAI API endpoint and does not use `OPENAI_API_KEY`.
+OpenAI API endpoint and does not use `OPENAI_API_KEY`. The fixed subscription
+model is `gpt-5.6-luna` with low reasoning effort.
 
 To authenticate the EC2 CLI interactively, use `codex login --device-auth` in
 the dedicated remote tmux session. LibreChat only receives the CLI response;

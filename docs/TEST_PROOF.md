@@ -191,7 +191,7 @@ Private local AWS evidence:
 ## ChatGPT subscription GUI bridge
 
 The EC2 Codex CLI was authenticated with ChatGPT device authorization. The
-adapter exposes `codex-subscription` at `/codex/v1/models` and runs each
+adapter exposes `gpt-5.6-luna` at `/codex/v1/models` and runs each
 request with `--sandbox read-only`, `--ephemeral`, and a non-repository working
 directory. A direct E2E request returned `CODEX_GUI_E2E_PASS`, and the LibreChat
 startup log loaded `Codex Subscription (EC2)`. This is a custom CLI bridge, not

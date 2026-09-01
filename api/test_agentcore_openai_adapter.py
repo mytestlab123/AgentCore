@@ -124,6 +124,9 @@ class AdapterTests(unittest.TestCase):
             self.assertIn("--sandbox", command)
             self.assertIn("read-only", command)
             self.assertIn("--ephemeral", command)
+            self.assertIn("-m", command)
+            self.assertIn("gpt-5.6-luna", command)
+            self.assertIn('model_reasoning_effort="low"', command)
             self.assertNotIn("--dangerously-bypass-approvals-and-sandbox", command)
 
 
