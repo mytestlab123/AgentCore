@@ -26,7 +26,19 @@ AGENTCORE_CLI = os.environ.get(
 CODEX_CLI = os.environ.get("CODEX_CLI", "/opt/agentcore-codex/node_modules/.bin/codex")
 CODEX_HOME = os.environ.get("CODEX_HOME", "/root/.codex")
 CODEX_WORKDIR = os.environ.get("CODEX_WORKDIR", "/opt/agentcore-codex")
-CODEX_MODEL = os.environ.get("CODEX_MODEL", "gpt-5.6-luna")
+CODEX_FAMILY_MODELS = ("gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol")
+CODEX_REASONING_EFFORTS = ("low", "medium", "high")
+CODEX_DEFAULT_MODEL = os.environ.get("CODEX_MODEL", "gpt-5.6-luna")
+if CODEX_DEFAULT_MODEL not in CODEX_FAMILY_MODELS:
+    CODEX_DEFAULT_MODEL = "gpt-5.6-luna"
+CODEX_DEFAULT_EFFORT = os.environ.get("CODEX_REASONING_EFFORT", "low")
+if CODEX_DEFAULT_EFFORT not in CODEX_REASONING_EFFORTS:
+    CODEX_DEFAULT_EFFORT = "low"
+CODEX_MODEL_OPTIONS = tuple(
+    f"{model}-{effort}"
+    for model in CODEX_FAMILY_MODELS
+    for effort in CODEX_REASONING_EFFORTS
+)
 MODEL_ID = "global.amazon.nova-2-lite-v1:0"
 HARNESS_MAX_TOKENS = os.environ.get("AGENTCORE_MAX_TOKENS", "6000")
 PLATFORM_BASE_URL = os.environ.get("PLATFORM_API_BASE_URL", "https://api-public.ai.tech.gov.sg")
@@ -118,9 +130,18 @@ def _platform_credentials(authorization: str | None) -> tuple[str, str]:
     return key, config.get("PLATFORM_API_BASE_URL", PLATFORM_BASE_URL)
 
 
-def invoke_codex(prompt: str, model: str = CODEX_MODEL) -> str:
-    if model != CODEX_MODEL:
-        raise RuntimeError("Codex subscription model is not available")
+def _codex_model_selection(selection: str) -> tuple[str, str, str]:
+    if selection in CODEX_MODEL_OPTIONS:
+        base_model, effort = selection.rsplit("-", 1)
+        return base_model, effort, selection
+    if selection in CODEX_FAMILY_MODELS:
+        canonical = f"{selection}-{CODEX_DEFAULT_EFFORT}"
+        return selection, CODEX_DEFAULT_EFFORT, canonical
+    raise RuntimeError("Codex subscription model is not available")
+
+
+def invoke_codex(prompt: str, model: str = CODEX_DEFAULT_MODEL) -> str:
+    base_model, effort, _ = _codex_model_selection(model)
     if not os.path.isfile(CODEX_CLI) or not os.access(CODEX_CLI, os.X_OK):
         raise RuntimeError("Codex CLI is not installed")
     if not os.path.isfile(os.path.join(CODEX_HOME, "auth.json")):
@@ -139,9 +160,9 @@ def invoke_codex(prompt: str, model: str = CODEX_MODEL) -> str:
             "-C",
             CODEX_WORKDIR,
             "-m",
-            model,
+            base_model,
             "-c",
-            'model_reasoning_effort="low"',
+            f'model_reasoning_effort="{effort}"',
             prompt,
         ],
         check=False,
@@ -319,7 +340,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/codex/v1/models":
             self._models(
-                [{"id": CODEX_MODEL, "object": "model", "owned_by": "openai-chatgpt"}]
+                [
+                    {"id": model, "object": "model", "owned_by": "openai-chatgpt"}
+                    for model in CODEX_MODEL_OPTIONS
+                ]
             )
             return
         self._send(404, _error("route not found"))
@@ -340,7 +364,9 @@ class Handler(BaseHTTPRequestHandler):
                     self.headers.get("authorization"),
                 )
             elif is_codex:
-                text = invoke_codex(_user_prompt(payload), str(payload.get("model", CODEX_MODEL)))
+                requested_model = str(payload.get("model", CODEX_DEFAULT_MODEL))
+                _, _, codex_response_model = _codex_model_selection(requested_model)
+                text = invoke_codex(_user_prompt(payload), requested_model)
             else:
                 text = invoke_harness(_user_prompt(payload))
         except (ValueError, json.JSONDecodeError) as exc:
@@ -353,7 +379,11 @@ class Handler(BaseHTTPRequestHandler):
             self._send(502, _error(str(exc)))
             return
         request_id = f"chatcmpl-{uuid.uuid4().hex}"
-        response_model = CODEX_MODEL if is_codex else (str(payload.get("model", "")) if is_platform else "agentcore-nova-2-lite")
+        response_model = (
+            codex_response_model
+            if is_codex
+            else (str(payload.get("model", "")) if is_platform else "agentcore-nova-2-lite")
+        )
         if payload.get("stream") is True:
             self._send_stream(request_id, text, response_model)
             return

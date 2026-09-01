@@ -46,6 +46,38 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(events[0]["choices"][0]["delta"]["content"], "hello")
         self.assertEqual(events[1]["choices"][0]["finish_reason"], "stop")
 
+    def test_codex_selector_matrix_maps_effort_to_base_model(self):
+        self.assertEqual(len(adapter.CODEX_MODEL_OPTIONS), 9)
+        self.assertEqual(
+            adapter._codex_model_selection("gpt-5.6-luna-high"),
+            ("gpt-5.6-luna", "high", "gpt-5.6-luna-high"),
+        )
+        self.assertEqual(
+            adapter._codex_model_selection("gpt-5.6-sol-medium"),
+            ("gpt-5.6-sol", "medium", "gpt-5.6-sol-medium"),
+        )
+
+    def test_codex_selector_passes_high_effort_to_cli(self):
+        with tempfile.TemporaryDirectory() as home:
+            auth_path = os.path.join(home, "auth.json")
+            open(auth_path, "w", encoding="utf-8").close()
+            completed = type(
+                "Completed",
+                (),
+                {
+                    "returncode": 0,
+                    "stdout": json.dumps({
+                        "type": "item.completed",
+                        "item": {"type": "agent_message", "text": "ok"},
+                    }),
+                },
+            )()
+            with patch.object(adapter, "CODEX_CLI", "/opt/codex"), patch.object(adapter, "CODEX_HOME", home), patch("os.path.isfile", side_effect=lambda path: path in {"/opt/codex", auth_path}), patch("os.access", return_value=True), patch("subprocess.run", return_value=completed) as run:
+                self.assertEqual(adapter.invoke_codex("hello", "gpt-5.6-luna-high"), "ok")
+            command = run.call_args.args[0]
+            self.assertIn("gpt-5.6-luna", command)
+            self.assertIn('model_reasoning_effort="high"', command)
+
     def test_platform_requires_user_provided_key(self):
         with self.assertRaisesRegex(adapter.ProviderAuthError, "protected config is not available"):
             adapter.invoke_platform("hello", "gpt-5.6-luna", None)

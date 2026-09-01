@@ -43,8 +43,14 @@ returns minimal OpenAI-compatible SSE chunks and closes the stream after
 Gemini 3.5 Flash. Errors are explicit; no provider or model fallback exists.
 The experimental `Codex Subscription (EC2)` endpoint invokes the authenticated
 EC2 Codex CLI with `--sandbox read-only` and `--ephemeral`; it is not an
-OpenAI API endpoint and does not use `OPENAI_API_KEY`. The fixed subscription
-model is `gpt-5.6-luna` with low reasoning effort.
+OpenAI API endpoint and does not use `OPENAI_API_KEY`.
+The subscription selector exposes nine explicit choices: each of
+`gpt-5.6-luna`, `gpt-5.6-terra`, and `gpt-5.6-sol` at `low`, `medium`, and
+`high` reasoning effort. For example, `gpt-5.6-luna-high` maps to the Codex
+CLI model `gpt-5.6-luna` with `model_reasoning_effort="high"`. Luna is the
+cost-saving default; Terra is the balanced option; Sol is the quality-first
+option. These labels are adapter-owned selector IDs, not separate model
+providers.
 
 To authenticate the EC2 CLI interactively, use `codex login --device-auth` in
 the dedicated remote tmux session. LibreChat only receives the CLI response;

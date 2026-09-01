@@ -13,7 +13,15 @@ endpoints:
       baseURL: http://127.0.0.1:3081/codex/v1
       models:
         default:
-          - gpt-5.6-luna
+          - gpt-5.6-luna-low
+          - gpt-5.6-luna-medium
+          - gpt-5.6-luna-high
+          - gpt-5.6-terra-low
+          - gpt-5.6-terra-medium
+          - gpt-5.6-terra-high
+          - gpt-5.6-sol-low
+          - gpt-5.6-sol-medium
+          - gpt-5.6-sol-high
       fetch: false
     - name: GovTechAI
       apiKey: local-poc-placeholder
