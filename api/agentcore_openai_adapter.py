@@ -280,13 +280,13 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _send_stream(self, request_id: str, text: str) -> None:
+    def _send_stream(self, request_id: str, text: str, model: str) -> None:
         self.send_response(200)
         self.send_header("content-type", "text/event-stream")
         self.send_header("cache-control", "no-cache")
         self.send_header("connection", "close")
         self.end_headers()
-        for event in _stream_events(request_id, text):
+        for event in _stream_events(request_id, text, model):
             body = f"data: {json.dumps(event)}\n\n".encode("utf-8")
             self.wfile.write(body)
             self.wfile.flush()
