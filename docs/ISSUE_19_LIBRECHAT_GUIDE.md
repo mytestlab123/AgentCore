@@ -34,6 +34,17 @@ using the normal LibreChat configuration path. Set a local placeholder API key
 in LibreChat; it is not an AWS key. Keep the adapter reachable only on the
 private host or SSM tunnel.
 
+For this POC, set `ENDPOINTS=custom` in LibreChat's `.env` before restarting.
+This keeps the built-in OpenAI endpoint out of the selector, so a new chat
+opens on AgentCore instead of asking for an OpenAI subscription key. The
+custom endpoint key is only the local placeholder consumed by the adapter; it
+is not an AWS or OpenAI credential. After restart, refresh the browser and
+start a new chat.
+
+```dotenv
+ENDPOINTS=custom
+```
+
 ```yaml
 version: 1.2.1
 endpoints:
