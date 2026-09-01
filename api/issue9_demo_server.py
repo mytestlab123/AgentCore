@@ -459,6 +459,10 @@ class LiveAwsPlayground:
                 "severity": finding.get("severity", "UNKNOWN"),
                 "status": finding.get("status", "UNKNOWN"),
                 "resourceType": (finding.get("resources") or [{}])[0].get("type", "UNKNOWN"),
+                "vulnerabilityId": finding.get("packageVulnerabilityDetails", {}).get("vulnerabilityId", "Not available"),
+                "inspectorScore": finding.get("inspectorScore", "Not available"),
+                "exploitAvailable": finding.get("exploitAvailable", "UNKNOWN"),
+                "fixAvailable": finding.get("fixAvailable", "UNKNOWN"),
             } for finding in payload.get("findings", [])]
         if tool == "ssm":
             completed = subprocess.run(

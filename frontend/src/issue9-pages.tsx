@@ -165,9 +165,14 @@ export function Issue9HomePage() {
 }
 
 export function Issue9PlaygroundPage() {
+  const toolPrompts = {
+    ec2: 'List all EC2 instance names in the Singapore Region. Return names only.',
+    inspector: 'List the top 10 Amazon Inspector findings as a table. Show severity, CVE or vulnerability ID, title, affected resource type, exploit availability, and fix availability. Use only the provided findings.',
+    ssm: 'Fixed policy check: deny SSM Parameter Store list/get access.',
+  } as const;
   const [model, setModel] = useState<'nova2' | 'nova_pro'>('nova2');
   const [tool, setTool] = useState<'ec2' | 'inspector' | 'ssm'>('ec2');
-  const [prompt, setPrompt] = useState('List all EC2 instance names in the Singapore Region. Return names only.');
+  const [prompt, setPrompt] = useState<string>(toolPrompts.ec2);
   const [result, setResult] = useState<AwsPlaygroundResult | null>(null);
   const [error, setError] = useState('');
   const [running, setRunning] = useState(false);
@@ -183,7 +188,7 @@ export function Issue9PlaygroundPage() {
       <div className="page-header-row"><PageHeader eyebrow="Issue #12 live AWS demo" title="Governed model playground" description="A fixed read-only role fetches sanitized AWS facts; the selected Nova model summarizes them. SSM Parameter Store is always denied." /><Badge tone={result?.decision === 'ALLOW' ? 'green' : result?.decision === 'DENY' ? 'gray' : 'amber'}>{result?.decision || 'READY'}</Badge></div>
       {error && <div className="error-box">{error}</div>}
       <section className="playground-grid">
-        <article className="panel prompt-panel"><label>Model</label><select value={model} onChange={(event) => setModel(event.target.value as typeof model)}><option value="nova2">Nova 2 Lite</option><option value="nova_pro">Nova Pro</option></select><label>AWS tool</label><select value={tool} onChange={(event) => setTool(event.target.value as typeof tool)}><option value="ec2">EC2 inventory</option><option value="inspector">Inspector findings</option><option value="ssm">SSM secret access - deny proof</option></select><label>Question</label><textarea rows={7} value={tool === 'ssm' ? 'Fixed policy check: deny SSM Parameter Store list/get access.' : prompt} disabled={tool === 'ssm'} onChange={(event) => setPrompt(event.target.value)} /><div className="prompt-footer"><small>{tool === 'ssm' ? 'The model is not called and no secret metadata is returned.' : 'Fixed allowlist; no arbitrary AWS commands.'}</small><button className="button button-primary" disabled={running} onClick={() => void run()}>{running ? 'Running...' : tool === 'ssm' ? 'Prove AWS deny' : 'Run live proof'}</button></div></article>
+        <article className="panel prompt-panel"><label>Model</label><select value={model} onChange={(event) => setModel(event.target.value as typeof model)}><option value="nova2">Nova 2 Lite</option><option value="nova_pro">Nova Pro</option></select><label>AWS tool</label><select value={tool} onChange={(event) => { const next = event.target.value as typeof tool; setTool(next); setPrompt(toolPrompts[next]); }}><option value="ec2">EC2 inventory</option><option value="inspector">Inspector findings</option><option value="ssm">SSM secret access - deny proof</option></select><label>Question</label><textarea rows={7} value={prompt} disabled={tool === 'ssm'} onChange={(event) => setPrompt(event.target.value)} /><div className="prompt-footer"><small>{tool === 'ssm' ? 'The model is not called and no secret metadata is returned.' : 'Fixed allowlist; no arbitrary AWS commands.'}</small><button className="button button-primary" disabled={running} onClick={() => void run()}>{running ? 'Running...' : tool === 'ssm' ? 'Prove AWS deny' : 'Run live proof'}</button></div></article>
         <article className="panel response-panel"><div className="response-heading"><div><p className="eyebrow">Live result</p><h2>{result ? (result.tool === 'ssm' ? 'AWS IAM policy boundary' : 'Nova summary') : 'Ready'}</h2></div>{result && <Badge tone={result.decision === 'ALLOW' ? 'green' : 'gray'}>{result.decision}</Badge>}</div>{result ? <><div className={result.decision === 'DENY' ? 'error-box denied-response' : 'response-copy'}>{result.answer}</div><div className="metadata-grid"><div><span>Model</span><strong>{result.model}</strong></div><div><span>Sanitized records</span><strong>{result.records.length}</strong></div><div><span>Tokens</span><strong>{result.inputTokens} in / {result.outputTokens} out</strong></div></div></> : <div className="empty-response"><span>&gt;_</span><strong>Select a model and AWS tool</strong><p>EC2 and Inspector return sanitized facts. SSM must return an AWS IAM deny with zero secret data.</p></div>}</article>
       </section>
     </>

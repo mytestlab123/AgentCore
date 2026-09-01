@@ -41,6 +41,13 @@ deterministic AWS IAM denial with zero records and zero tokens. The Issue #12
 navigation no longer presents the legacy Logs page. This correction was also
 validated without Playwright.
 
+Inspector positive-result proof: selecting Inspector now supplies a matching
+default question and public-safe fields only: title, severity, status,
+resource type, CVE or vulnerability ID, Inspector score, exploit availability,
+and fix availability. A direct live call through Nova 2 Lite returned ALLOW,
+20 sanitized findings, and a non-empty top-10 summary. Finding ARNs, account
+identifiers, and resource IDs were not supplied to the model or response.
+
 ## Bottom line
 
 Issue #9 passed the dark-mode GUI journey at `http://127.0.0.1:5174/` using
