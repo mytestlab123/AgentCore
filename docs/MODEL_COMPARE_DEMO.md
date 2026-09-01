@@ -2,7 +2,7 @@
 
 ## One-minute journey
 
-1. Open `http://localhost:5174/#/playground`.
+1. Open `http://localhost:3333/#/playground`.
 2. Select **Compare**.
 3. Keep the public-safe S3 security prompt.
 4. Select **Compare models**.
@@ -23,8 +23,8 @@
 ## Optional Single PlatformAI models
 
 Single mode also offers **PlatformAI Claude Haiku 4.5** and **PlatformAI Gemini
-2.5 Flash Lite** using the proven exact routes `azure.claude-haiku-4-5` and
-`gemini-2.5-flash-lite`. The rejected `bedrock.claude-haiku-4-5` identifier is
+2.5 Flash** using the proven exact routes `azure.claude-haiku-4-5` and
+`gemini-2.5-flash`. The rejected `bedrock.claude-haiku-4-5` identifier is
 not used. Claude and Gemini requests omit GPT reasoning settings.
 
 EC2 and Inspector are available for these external models only after another

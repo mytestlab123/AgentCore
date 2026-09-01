@@ -32,7 +32,7 @@ NOVA_MODELS = {
 }
 PLATFORM_MODEL = "gpt-5.6-luna"
 PLATFORM_CLAUDE_MODEL = "azure.claude-haiku-4-5"
-PLATFORM_GEMINI_MODEL = "gemini-2.5-flash-lite"
+PLATFORM_GEMINI_MODEL = "gemini-2.5-flash"
 PLATFORM_BASE_URL = "https://api-public.ai.tech.gov.sg"
 
 
@@ -678,9 +678,11 @@ class Issue9Handler(BaseHTTPRequestHandler):
         "http://localhost:5173",
         "http://localhost:5174",
         "http://localhost:5175",
+        "http://localhost:3333",
         "http://127.0.0.1:5173",
         "http://127.0.0.1:5174",
         "http://127.0.0.1:5175",
+        "http://127.0.0.1:3333",
     }
 
     def _send_json(self, status, body):
