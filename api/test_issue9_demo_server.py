@@ -58,7 +58,7 @@ class Issue9DemoStatusTests(unittest.TestCase):
         self.assertEqual(result["results"][1]["status"], "NOT AVAILABLE")
         self.assertEqual(result["results"][1]["inputTokens"], None)
 
-    def test_platform_claude_is_text_only_and_omits_gpt_reasoning(self):
+    def test_platform_models_use_sanitized_tools_and_omit_gpt_reasoning(self):
         with tempfile.TemporaryDirectory() as directory:
             config = Path(directory) / "config.env"
             config.write_text(
@@ -68,18 +68,26 @@ class Issue9DemoStatusTests(unittest.TestCase):
             config.chmod(0o600)
 
             class ClaudePlayground(LiveAwsPlayground):
+                def _role_env(self):
+                    return {}
+
+                def _source(self, tool, env):
+                    return [{"instanceAlias": "real-name-must-not-leave", "state": "running", "instanceType": "small"}]
+
                 def _platform_request(self, path, key, payload=None):
                     if path == "models":
-                        return {"data": [{"id": "azure.claude-haiku-4-5"}]}
+                        return {"data": [{"id": "azure.claude-haiku-4-5"}, {"id": "gemini-2.5-flash-lite"}]}
                     self.payload = payload
                     return {"status": "completed", "output": [{"content": [{"type": "output_text", "text": "Safe answer"}]}],
                             "usage": {"input_tokens": 9, "output_tokens": 4}}
 
             controller = ClaudePlayground(platform_config=config)
-            result = controller.platform_text({"model": "azure.claude-haiku-4-5", "prompt": "Explain one synthetic risk."})
+            result = controller.platform_tool({"model": "gemini-2.5-flash-lite", "tool": "ec2", "prompt": "Summarize."})
 
-        self.assertEqual(result["model"], "azure.claude-haiku-4-5")
-        self.assertEqual(result["tool"], "text")
+        self.assertEqual(result["model"], "gemini-2.5-flash-lite")
+        self.assertEqual(result["tool"], "ec2")
+        self.assertEqual(result["records"][0]["instanceAlias"], "instance-1")
+        self.assertNotIn("real-name-must-not-leave", json.dumps(controller.payload))
         self.assertNotIn("reasoning", controller.payload)
 
     def test_nova_key_status_uses_fingerprint_not_secret_prefix(self):

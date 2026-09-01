@@ -36,9 +36,19 @@ Claude route check: GTX rejected `bedrock.claude-haiku-4-5` before inference
 because the configured provider permits Azure routes only. A single minimal
 probe of `azure.claude-haiku-4-5` completed successfully with 11 input tokens
 and 5 output tokens. The Single-mode option therefore uses only the proven
-Azure route, hides AWS tools, accepts text only, and omits GPT reasoning fields.
+Azure route and omits GPT reasoning fields.
 The final loopback API proof returned ALLOW, `completed`, a non-empty Markdown
 answer, 37 input tokens, 80 output tokens, and zero records.
+
+Gemini route check: the authenticated PlatformAI catalogue contains
+`gemini-2.5-flash-lite`; a minimal direct Responses call completed with 4 input
+tokens and 1 output token. Single mode now permits Claude or Gemini to summarize
+externally sanitized EC2 or Inspector records. Real EC2 names are replaced by
+numbered aliases; account IDs, ARNs, and resource IDs remain excluded. SSM is
+still denied without model invocation.
+The final loopback Gemini plus EC2 proof returned ALLOW, `completed`, one
+externally sanitized record, 78 input tokens, 33 output tokens, and a non-empty
+answer. The record used a numbered alias rather than the real EC2 name.
 
 ## Issue #12 governed AWS playground proof
 

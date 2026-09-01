@@ -32,6 +32,7 @@ NOVA_MODELS = {
 }
 PLATFORM_MODEL = "gpt-5.6-luna"
 PLATFORM_CLAUDE_MODEL = "azure.claude-haiku-4-5"
+PLATFORM_GEMINI_MODEL = "gemini-2.5-flash-lite"
 PLATFORM_BASE_URL = "https://api-public.ai.tech.gov.sg"
 
 
@@ -585,17 +586,32 @@ class LiveAwsPlayground:
         usage = response.get("usage", {})
         return answer, usage, response.get("status", "unknown")
 
-    def platform_text(self, body):
+    def platform_tool(self, body):
         prompt = str(body.get("prompt", "")).strip()
-        if body.get("model") != PLATFORM_CLAUDE_MODEL or not prompt or len(prompt) > 500:
-            raise RuntimeError("Use the approved Claude model and a prompt of 1 to 500 characters.")
+        model = body.get("model")
+        tool = body.get("tool")
+        if model not in {PLATFORM_CLAUDE_MODEL, PLATFORM_GEMINI_MODEL} or tool not in {"ec2", "inspector", "ssm"}:
+            raise RuntimeError("Use one approved PlatformAI model and AWS tool.")
+        if not prompt or len(prompt) > 500:
+            raise RuntimeError("Use a prompt of 1 to 500 characters.")
+        records = self._source(tool, self._role_env())
+        if tool == "ssm":
+            return {"decision": "DENY", "tool": tool, "model": model, "records": [],
+                    "answer": "AWS IAM explicitly denied SSM Parameter Store. No parameter names or values were returned.",
+                    "inputTokens": 0, "outputTokens": 0, "stopReason": "policy_denied", "latencyMs": 0}
+        external_records = records
+        if tool == "ec2":
+            external_records = [{**{key: value for key, value in record.items() if key != "instanceAlias"},
+                                 "instanceAlias": f"instance-{index}"}
+                                for index, record in enumerate(records, start=1)]
         started = time.monotonic()
         answer, usage, completion = self._invoke_platform(
-            "Return concise GitHub-flavored Markdown. Do not claim tool or account access.\n\n" + prompt,
-            PLATFORM_CLAUDE_MODEL,
+            "Return concise GitHub-flavored Markdown. Use only the supplied sanitized AWS records. "
+            "Do not claim tool or account access.\n\n" + prompt + "\n\nSanitized AWS records:\n" + json.dumps(external_records),
+            model,
         )
-        return {"decision": "ALLOW", "tool": "text", "model": PLATFORM_CLAUDE_MODEL,
-                "records": [], "answer": answer,
+        return {"decision": "ALLOW", "tool": tool, "model": model,
+                "records": external_records, "answer": answer,
                 "inputTokens": usage.get("input_tokens", 0), "outputTokens": usage.get("output_tokens", 0),
                 "stopReason": completion, "latencyMs": round((time.monotonic() - started) * 1000)}
 
@@ -764,13 +780,13 @@ class Issue9Handler(BaseHTTPRequestHandler):
             except (RuntimeError, json.JSONDecodeError, KeyError, TypeError) as error:
                 self._send_json(409, {"message": str(error)})
             return
-        if path == "/platform-text":
+        if path == "/platform-tool":
             try:
                 content_length = int(self.headers.get("content-length", "0"))
                 if content_length < 1 or content_length > 1024:
-                    raise RuntimeError("Invalid PlatformAI text request.")
+                    raise RuntimeError("Invalid PlatformAI tool request.")
                 body = json.loads(self.rfile.read(content_length))
-                self._send_json(200, self.live_playground.platform_text(body))
+                self._send_json(200, self.live_playground.platform_tool(body))
             except (RuntimeError, json.JSONDecodeError, KeyError, TypeError) as error:
                 self._send_json(409, {"message": str(error)})
             return

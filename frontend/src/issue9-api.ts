@@ -136,10 +136,10 @@ export function runAwsPlayground(model: 'nova2' | 'nova_pro', tool: 'ec2' | 'ins
   });
 }
 
-export function runPlatformText(prompt: string): Promise<AwsPlaygroundResult> {
-  return liveRequest('/platform-text', {
+export function runPlatformTool(model: 'azure.claude-haiku-4-5' | 'gemini-2.5-flash-lite', tool: 'ec2' | 'inspector' | 'ssm', prompt: string): Promise<AwsPlaygroundResult> {
+  return liveRequest('/platform-tool', {
     method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ model: 'azure.claude-haiku-4-5', prompt }),
+    body: JSON.stringify({ model, tool, prompt }),
   });
 }
 
