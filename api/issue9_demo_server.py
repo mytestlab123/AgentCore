@@ -31,6 +31,7 @@ NOVA_MODELS = {
     "nova_pro": "apac.amazon.nova-pro-v1:0",
 }
 PLATFORM_MODEL = "gpt-5.6-luna"
+PLATFORM_CLAUDE_MODEL = "azure.claude-haiku-4-5"
 PLATFORM_BASE_URL = "https://api-public.ai.tech.gov.sg"
 
 
@@ -427,7 +428,7 @@ class LiveAwsPlayground:
         self.profile = profile
         self.region = region
         self.platform_config = Path(platform_config)
-        self.platform_authorized = False
+        self.platform_authorized_models = None
 
     def key_status(self):
         keys = {}
@@ -557,20 +558,22 @@ class LiveAwsPlayground:
                 raise RuntimeError("ERROR: PlatformAI request failed.") from error
         raise RuntimeError("ERROR: PlatformAI request failed.")
 
-    def _invoke_platform(self, prompt):
+    def _invoke_platform(self, prompt, model=PLATFORM_MODEL):
         config = _read_platform_config(self.platform_config)
         key = config["PLATFORM_API_KEY"]
-        if not self.platform_authorized:
+        if self.platform_authorized_models is None:
             catalog = self._platform_request("models", key)
-            if not any(item.get("id") == PLATFORM_MODEL for item in catalog.get("data", [])):
-                raise RuntimeError("NOT AVAILABLE: PlatformAI GPT-5.6 Luna is unavailable.")
-            self.platform_authorized = True
-        response = self._platform_request("responses", key, {
-            "model": PLATFORM_MODEL,
+            self.platform_authorized_models = {item.get("id") for item in catalog.get("data", [])}
+        if model not in self.platform_authorized_models:
+            raise RuntimeError(f"NOT AVAILABLE: PlatformAI model {model} is unavailable.")
+        payload = {
+            "model": model,
             "input": prompt,
             "max_output_tokens": 700,
-            "reasoning": {"effort": "low"},
-        })
+        }
+        if model == PLATFORM_MODEL:
+            payload["reasoning"] = {"effort": "low"}
+        response = self._platform_request("responses", key, payload)
         answer = "".join(
             content.get("text", "")
             for item in response.get("output", [])
@@ -581,6 +584,20 @@ class LiveAwsPlayground:
             raise RuntimeError("ERROR: PlatformAI returned an incomplete response.")
         usage = response.get("usage", {})
         return answer, usage, response.get("status", "unknown")
+
+    def platform_text(self, body):
+        prompt = str(body.get("prompt", "")).strip()
+        if body.get("model") != PLATFORM_CLAUDE_MODEL or not prompt or len(prompt) > 500:
+            raise RuntimeError("Use the approved Claude model and a prompt of 1 to 500 characters.")
+        started = time.monotonic()
+        answer, usage, completion = self._invoke_platform(
+            "Return concise GitHub-flavored Markdown. Do not claim tool or account access.\n\n" + prompt,
+            PLATFORM_CLAUDE_MODEL,
+        )
+        return {"decision": "ALLOW", "tool": "text", "model": PLATFORM_CLAUDE_MODEL,
+                "records": [], "answer": answer,
+                "inputTokens": usage.get("input_tokens", 0), "outputTokens": usage.get("output_tokens", 0),
+                "stopReason": completion, "latencyMs": round((time.monotonic() - started) * 1000)}
 
     def compare(self, body):
         prompt = str(body.get("prompt", "")).strip()
@@ -744,6 +761,16 @@ class Issue9Handler(BaseHTTPRequestHandler):
                     raise RuntimeError("Invalid compare request.")
                 body = json.loads(self.rfile.read(content_length))
                 self._send_json(200, self.live_playground.compare(body))
+            except (RuntimeError, json.JSONDecodeError, KeyError, TypeError) as error:
+                self._send_json(409, {"message": str(error)})
+            return
+        if path == "/platform-text":
+            try:
+                content_length = int(self.headers.get("content-length", "0"))
+                if content_length < 1 or content_length > 1024:
+                    raise RuntimeError("Invalid PlatformAI text request.")
+                body = json.loads(self.rfile.read(content_length))
+                self._send_json(200, self.live_playground.platform_text(body))
             except (RuntimeError, json.JSONDecodeError, KeyError, TypeError) as error:
                 self._send_json(409, {"message": str(error)})
             return

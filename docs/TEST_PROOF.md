@@ -32,6 +32,14 @@ the successful provider lane when the other fails, and reports stable
 tests plus frontend lint/tests/build pass. Inference POSTs are not retried, to
 avoid duplicate usage. No credential was changed.
 
+Claude route check: GTX rejected `bedrock.claude-haiku-4-5` before inference
+because the configured provider permits Azure routes only. A single minimal
+probe of `azure.claude-haiku-4-5` completed successfully with 11 input tokens
+and 5 output tokens. The Single-mode option therefore uses only the proven
+Azure route, hides AWS tools, accepts text only, and omits GPT reasoning fields.
+The final loopback API proof returned ALLOW, `completed`, a non-empty Markdown
+answer, 37 input tokens, 80 output tokens, and zero records.
+
 ## Issue #12 governed AWS playground proof
 
 Last verified: 1 September 2026, 15:29 SGT

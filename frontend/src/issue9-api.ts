@@ -89,7 +89,7 @@ export interface NovaKeysStatus {
 
 export interface AwsPlaygroundResult {
   decision: 'ALLOW' | 'DENY';
-  tool: 'ec2' | 'inspector' | 'ssm';
+  tool: 'ec2' | 'inspector' | 'ssm' | 'text';
   model: string;
   records: Record<string, string>[];
   answer: string;
@@ -133,6 +133,13 @@ export function runAwsPlayground(model: 'nova2' | 'nova_pro', tool: 'ec2' | 'ins
   return liveRequest('/aws-playground', {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ model, tool, prompt }),
+  });
+}
+
+export function runPlatformText(prompt: string): Promise<AwsPlaygroundResult> {
+  return liveRequest('/platform-text', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ model: 'azure.claude-haiku-4-5', prompt }),
   });
 }
 

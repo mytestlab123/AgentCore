@@ -20,6 +20,13 @@
   findings, AWS identifiers, or SSM data.
 - No model or provider fallback is allowed.
 
+## Optional Single text model
+
+Single mode also offers **PlatformAI Claude Haiku 4.5** using the proven exact
+route `azure.claude-haiku-4-5`. Selecting it hides AWS tools and accepts only a
+public-safe text prompt. The rejected `bedrock.claude-haiku-4-5` identifier is
+not used. Claude requests omit GPT reasoning settings.
+
 ## Honest claim
 
 This is a two-provider response comparison through one developer interface. It
