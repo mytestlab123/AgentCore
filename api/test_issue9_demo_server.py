@@ -11,6 +11,16 @@ from issue9_demo_server import CodexKeyController, Issue9Handler, LiveAwsPlaygro
 
 
 class Issue9DemoStatusTests(unittest.TestCase):
+    def test_inspector_sample_contains_exactly_fifty_public_safe_rows(self):
+        records = LiveAwsPlayground()._source("inspector", {})
+
+        self.assertEqual(len(records), 50)
+        self.assertEqual(
+            set(records[0]),
+            {"cve_id", "severity", "package_name", "installed_version", "fixed_version", "status"},
+        )
+        self.assertNotIn("instance_id", records[0])
+
     def test_platform_config_requires_mode_600_and_exact_provider(self):
         with tempfile.TemporaryDirectory() as directory:
             config = Path(directory) / "config.env"

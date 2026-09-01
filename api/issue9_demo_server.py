@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import csv
 import hashlib
 import json
 import os
@@ -23,6 +24,7 @@ DEFAULT_RETAINED_CREDENTIAL = Path.home() / ".AGENTS-temp" / "AgentCore" / "issu
 DEFAULT_CODEX_RETAINED_DIR = Path.home() / ".AGENTS-temp" / "AgentCore" / "issue12-codex-key"
 DEFAULT_KEY_ENV = Path("/home/user/git/awsops/.env")
 DEFAULT_GTX_CONFIG = Path.home() / ".config" / "gtx" / "config.env"
+INSPECTOR_SAMPLE = REPO_DIR / "docs" / "demo-data" / "seccop-inspector-sanitized.csv"
 LIVE_DEMO_ROLE = "agentcore-live-demo-readonly-role-r1"
 ALLOWED_MODEL = "apac.amazon.nova-lite-v1:0"
 RESTRICTED_MODEL = "apac.amazon.nova-pro-v1:0"
@@ -488,17 +490,14 @@ class LiveAwsPlayground:
                     })
             return records[:20]
         if tool == "inspector":
-            payload = self._aws(["inspector2", "list-findings", "--max-results", "20"], env)
-            return [{
-                "title": finding.get("title", "Untitled finding"),
-                "severity": finding.get("severity", "UNKNOWN"),
-                "status": finding.get("status", "UNKNOWN"),
-                "resourceType": (finding.get("resources") or [{}])[0].get("type", "UNKNOWN"),
-                "vulnerabilityId": finding.get("packageVulnerabilityDetails", {}).get("vulnerabilityId", "Not available"),
-                "inspectorScore": finding.get("inspectorScore", "Not available"),
-                "exploitAvailable": finding.get("exploitAvailable", "UNKNOWN"),
-                "fixAvailable": finding.get("fixAvailable", "UNKNOWN"),
-            } for finding in payload.get("findings", [])]
+            try:
+                with INSPECTOR_SAMPLE.open(encoding="utf-8", newline="") as sample:
+                    records = list(csv.DictReader(sample))
+            except OSError as error:
+                raise RuntimeError("Inspector demo sample is unavailable.") from error
+            if len(records) != 50:
+                raise RuntimeError("Inspector demo sample must contain exactly 50 findings.")
+            return records
         if tool == "ssm":
             completed = subprocess.run(
                 ["aws", "ssm", "describe-parameters", "--max-results", "1", "--region", self.region,
@@ -511,6 +510,14 @@ class LiveAwsPlayground:
                 raise RuntimeError("SSM deny proof did not return AccessDenied.")
             return []
         raise RuntimeError("Unknown AWS tool.")
+
+    def _evidence_text(self, tool, records):
+        if tool == "inspector":
+            try:
+                return INSPECTOR_SAMPLE.read_text(encoding="utf-8")
+            except OSError as error:
+                raise RuntimeError("Inspector demo sample is unavailable.") from error
+        return json.dumps(records)
 
     def _invoke(self, key_name, prompt):
         key = _read_env_value(self.key_env, key_name)
@@ -570,7 +577,7 @@ class LiveAwsPlayground:
         payload = {
             "model": model,
             "input": prompt,
-            "max_output_tokens": 700,
+            "max_output_tokens": 3000 if model == PLATFORM_GEMINI_MODEL else 700,
         }
         if model == PLATFORM_MODEL:
             payload["reasoning"] = {"effort": "low"}
@@ -594,7 +601,7 @@ class LiveAwsPlayground:
             raise RuntimeError("Use one approved PlatformAI model and AWS tool.")
         if not prompt or len(prompt) > 500:
             raise RuntimeError("Use a prompt of 1 to 500 characters.")
-        records = self._source(tool, self._role_env())
+        records = self._source(tool, {} if tool == "inspector" else self._role_env())
         if tool == "ssm":
             return {"decision": "DENY", "tool": tool, "model": model, "records": [],
                     "answer": "AWS IAM explicitly denied SSM Parameter Store. No parameter names or values were returned.",
@@ -606,8 +613,8 @@ class LiveAwsPlayground:
                                 for index, record in enumerate(records, start=1)]
         started = time.monotonic()
         answer, usage, completion = self._invoke_platform(
-            "Return concise GitHub-flavored Markdown. Use only the supplied sanitized AWS records. "
-            "Do not claim tool or account access.\n\n" + prompt + "\n\nSanitized AWS records:\n" + json.dumps(external_records),
+            "Return concise GitHub-flavored Markdown. Use only the supplied evidence records. "
+            "Do not claim tool or account access.\n\n" + prompt + "\n\nEvidence records:\n" + self._evidence_text(tool, external_records),
             model,
         )
         return {"decision": "ALLOW", "tool": tool, "model": model,
@@ -656,13 +663,13 @@ class LiveAwsPlayground:
         question = str(body.get("prompt", "")).strip()[:500]
         if key_name not in NOVA_MODELS or tool not in {"ec2", "inspector", "ssm"}:
             raise RuntimeError("Choose one supported model and AWS tool.")
-        records = self._source(tool, self._role_env())
+        records = self._source(tool, {} if tool == "inspector" else self._role_env())
         if tool == "ssm":
             return {"decision": "DENY", "tool": tool, "model": NOVA_MODELS[key_name],
                     "records": [], "answer": "AWS IAM explicitly denied SSM Parameter Store. No parameter names or values were returned.",
                     "inputTokens": 0, "outputTokens": 0, "stopReason": "policy_denied"}
         default_question = "Summarize the most important operational facts in three concise bullets."
-        prompt = (question or default_question) + "\nUse only this sanitized AWS data:\n" + json.dumps(records)
+        prompt = (question or default_question) + "\nUse only these evidence records:\n" + self._evidence_text(tool, records)
         answer, usage, stop_reason = self._invoke(key_name, prompt)
         return {"decision": "ALLOW", "tool": tool, "model": NOVA_MODELS[key_name],
                 "records": records, "answer": answer,
