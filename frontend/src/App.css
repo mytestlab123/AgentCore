@@ -208,6 +208,17 @@ dd { margin: 5px 0 0; color: #c9d6e6; font-size: 11px; font-weight: 700; }
 .prompt-panel select:focus, .prompt-panel textarea:focus { border-color: #4e84e5; box-shadow: 0 0 0 3px rgba(36,107,253,.09); }
 .prompt-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 17px; }
 .prompt-footer small { color: #8996a8; font-size: 9px; }
+.mode-toggle { display: inline-flex; margin-bottom: 18px; padding: 4px; border: 1px solid var(--line); border-radius: 9px; background: #081321; }
+.mode-toggle button { min-width: 92px; padding: 9px 16px; border: 0; border-radius: 6px; color: var(--muted); background: transparent; cursor: pointer; font-weight: 750; }
+.mode-toggle button.active { color: white; background: #246bfd; }
+.compare-prompt { margin-bottom: 18px; }
+.compare-prompt label { display: block; margin-bottom: 8px; color: #b5c4d6; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .07em; }
+.compare-prompt textarea { width: 100%; padding: 13px; border: 1px solid #334a67; border-radius: 8px; color: #e3edf8; background: #081321; font: inherit; line-height: 1.6; resize: vertical; }
+.compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.compare-card { min-width: 0; }
+.compare-card .response-copy { min-height: 210px; }
+.compare-meta { display: flex; flex-wrap: wrap; gap: 8px; }
+.compare-meta span { padding: 6px 9px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); background: var(--surface-soft); font-size: 9px; }
 .response-panel { min-height: 480px; }
 .response-heading { padding-bottom: 17px; border-bottom: 1px solid var(--line); }
 .empty-response { min-height: 340px; display: grid; align-content: center; justify-items: center; text-align: center; color: #93a0b1; }
@@ -286,7 +297,7 @@ dd { margin: 5px 0 0; color: #c9d6e6; font-size: 11px; font-weight: 700; }
   .breadcrumb { display: none; }
   .topbar { padding: 0 18px; }
   .page-content { padding: 22px 18px; }
-  .two-column-grid, .playground-grid, .usage-grid, .issue9-control-grid, .issue9-results { grid-template-columns: 1fr; }
+  .two-column-grid, .playground-grid, .usage-grid, .issue9-control-grid, .issue9-results, .compare-grid { grid-template-columns: 1fr; }
   .hero-card { min-height: 340px; padding: 35px 27px; }
   .table-panel { overflow-x: auto; }
   .page-footer { padding: 18px; }

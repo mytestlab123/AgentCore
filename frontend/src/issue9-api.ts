@@ -98,6 +98,21 @@ export interface AwsPlaygroundResult {
   stopReason: string;
 }
 
+export interface CompareLaneResult {
+  provider: 'Amazon Bedrock' | 'GovTech PlatformAI';
+  model: string;
+  status: 'ALLOW';
+  answer: string;
+  latencyMs: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  completion: string;
+}
+
+export interface CompareResult {
+  results: CompareLaneResult[];
+}
+
 async function liveRequest<T>(path: string, init?: RequestInit): Promise<T> {
   if (!issue9ApiBaseUrl) throw new Error('Live AWS backend URL is not configured.');
   const response = await fetch(`${issue9ApiBaseUrl}${path}`, init);
@@ -118,6 +133,13 @@ export function runAwsPlayground(model: 'nova2' | 'nova_pro', tool: 'ec2' | 'ins
   return liveRequest('/aws-playground', {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ model, tool, prompt }),
+  });
+}
+
+export function compareModels(prompt: string): Promise<CompareResult> {
+  return liveRequest('/compare', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ prompt }),
   });
 }
 

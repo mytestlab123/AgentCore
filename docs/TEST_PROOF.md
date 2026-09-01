@@ -2,6 +2,27 @@
 
 Last verified: 1 September 2026, 00:09 SGT
 
+## Issue #15 two-provider comparison
+
+Last verified: 1 September 2026, 18:51 SGT
+
+One live synthetic text prompt returned two independent successful responses:
+
+| Provider | Model | Result | Completion |
+| --- | --- | --- | --- |
+| Amazon Bedrock | Nova 2 Lite | ALLOW; response present | `end_turn` |
+| GovTech PlatformAI | GPT-5.6 Luna | ALLOW; response present | `completed` |
+
+The live run used no EC2 inventory, Inspector findings, AWS identifiers, or
+other tool data. PlatformAI reused the protected mode-600 GTX configuration;
+the capability key was not copied, printed, logged, committed, or returned to
+the browser. This proves one bounded provider comparison, not model quality or
+a scientific benchmark.
+
+Validation passed: 15 Python tests, frontend lint, 3 frontend tests,
+production build, dependency audit, Python compilation, diff check, and one
+live comparison. Playwright was not used.
+
 ## Issue #12 governed AWS playground proof
 
 Last verified: 1 September 2026, 15:29 SGT

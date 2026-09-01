@@ -7,10 +7,43 @@ import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
-from issue9_demo_server import CodexKeyController, Issue9Handler, LiveAwsPlayground, ProofController, build_public_status
+from issue9_demo_server import CodexKeyController, Issue9Handler, LiveAwsPlayground, ProofController, _read_platform_config, build_public_status
 
 
 class Issue9DemoStatusTests(unittest.TestCase):
+    def test_platform_config_requires_mode_600_and_exact_provider(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "config.env"
+            config.write_text(
+                'PLATFORM_API_KEY="secret"\nPLATFORM_API_BASE_URL="https://api-public.ai.tech.gov.sg"\nPLATFORM_AI_MODEL="gpt-5.6-luna"\n',
+                encoding="utf-8",
+            )
+            config.chmod(0o600)
+            values = _read_platform_config(config)
+            self.assertEqual(values["PLATFORM_AI_MODEL"], "gpt-5.6-luna")
+            config.chmod(0o644)
+            with self.assertRaisesRegex(RuntimeError, "mode 600"):
+                _read_platform_config(config)
+
+    def test_compare_uses_only_fixed_two_provider_lanes(self):
+        class ComparePlayground(LiveAwsPlayground):
+            def _invoke(self, key_name, prompt):
+                self.nova_input = (key_name, prompt)
+                return "Nova answer", {"inputTokens": 10, "outputTokens": 5}, "end_turn"
+
+            def _invoke_platform(self, prompt):
+                self.platform_input = prompt
+                return "Luna answer", {"input_tokens": 11, "output_tokens": 6}, "completed"
+
+        controller = ComparePlayground()
+        result = controller.compare({"prompt": "Explain one synthetic security risk."})
+
+        self.assertEqual([item["provider"] for item in result["results"]], ["Amazon Bedrock", "GovTech PlatformAI"])
+        self.assertEqual(result["results"][0]["model"], "global.amazon.nova-2-lite-v1:0")
+        self.assertEqual(result["results"][1]["model"], "gpt-5.6-luna")
+        self.assertEqual(controller.nova_input[0], "nova2")
+        self.assertNotIn("EC2", controller.platform_input)
+
     def test_nova_key_status_uses_fingerprint_not_secret_prefix(self):
         with tempfile.TemporaryDirectory() as directory:
             env_file = Path(directory) / ".env"

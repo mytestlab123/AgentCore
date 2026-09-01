@@ -6,6 +6,9 @@ import os
 import signal
 import subprocess
 import threading
+import time
+import urllib.error
+import urllib.request
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -19,6 +22,7 @@ DEFAULT_EVIDENCE_ROOT = Path.home() / ".AGENTS-temp" / "AgentCore" / "issue9-gui
 DEFAULT_RETAINED_CREDENTIAL = Path.home() / ".AGENTS-temp" / "AgentCore" / "issue9-retained" / "credential.json"
 DEFAULT_CODEX_RETAINED_DIR = Path.home() / ".AGENTS-temp" / "AgentCore" / "issue12-codex-key"
 DEFAULT_KEY_ENV = Path("/home/user/git/awsops/.env")
+DEFAULT_GTX_CONFIG = Path.home() / ".config" / "gtx" / "config.env"
 LIVE_DEMO_ROLE = "agentcore-live-demo-readonly-role-r1"
 ALLOWED_MODEL = "apac.amazon.nova-lite-v1:0"
 RESTRICTED_MODEL = "apac.amazon.nova-pro-v1:0"
@@ -26,6 +30,8 @@ NOVA_MODELS = {
     "nova2": "global.amazon.nova-2-lite-v1:0",
     "nova_pro": "apac.amazon.nova-pro-v1:0",
 }
+PLATFORM_MODEL = "gpt-5.6-luna"
+PLATFORM_BASE_URL = "https://api-public.ai.tech.gov.sg"
 
 
 def _read_env_value(path, name):
@@ -47,6 +53,31 @@ def _read_env_value(path, name):
 
 def _masked_key(value):
     return f"bedrock-{hashlib.sha256(value.encode('utf-8')).hexdigest()[:12]}********" if value else None
+
+
+def _read_platform_config(path):
+    try:
+        if path.stat().st_mode & 0o077:
+            raise RuntimeError("PlatformAI configuration must have mode 600.")
+        values = {}
+        allowed = {"PLATFORM_API_KEY", "PLATFORM_API_BASE_URL", "PLATFORM_AI_MODEL", "PLATFORM_AI_REASONING_EFFORT"}
+        for raw_line in path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("export "):
+                line = line[7:]
+            name, separator, value = line.partition("=")
+            if not separator or name.strip() not in allowed:
+                raise RuntimeError("PlatformAI configuration contains an unsupported setting.")
+            values[name.strip()] = value.strip().strip("'\"")
+    except OSError as error:
+        raise RuntimeError("PlatformAI is not configured.") from error
+    if values.get("PLATFORM_API_BASE_URL", "").rstrip("/") != PLATFORM_BASE_URL:
+        raise RuntimeError("PlatformAI External endpoint is not configured.")
+    if values.get("PLATFORM_AI_MODEL") != PLATFORM_MODEL or not values.get("PLATFORM_API_KEY"):
+        raise RuntimeError("PlatformAI GPT-5.6 Luna is not configured.")
+    return values
 
 
 def _read_json(path):
@@ -391,10 +422,11 @@ class CodexKeyController:
 
 
 class LiveAwsPlayground:
-    def __init__(self, key_env=DEFAULT_KEY_ENV, profile="amit", region="ap-southeast-1"):
+    def __init__(self, key_env=DEFAULT_KEY_ENV, profile="amit", region="ap-southeast-1", platform_config=DEFAULT_GTX_CONFIG):
         self.key_env = Path(key_env)
         self.profile = profile
         self.region = region
+        self.platform_config = Path(platform_config)
 
     def key_status(self):
         keys = {}
@@ -498,6 +530,71 @@ class LiveAwsPlayground:
         usage = response.get("usage", {})
         return text, usage, response.get("stopReason", "unknown")
 
+    def _platform_request(self, path, key, payload=None):
+        data = json.dumps(payload).encode("utf-8") if payload is not None else None
+        request = urllib.request.Request(
+            f"{PLATFORM_BASE_URL}/platform/models/v1/{path}", data=data,
+            headers={"x-api-key": key, "content-type": "application/json", "accept": "application/json"},
+            method="POST" if payload is not None else "GET",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:
+                return json.loads(response.read())
+        except urllib.error.HTTPError as error:
+            if error.code in {401, 403}:
+                raise RuntimeError("PlatformAI request was denied.") from error
+            if error.code == 404:
+                raise RuntimeError("PlatformAI model is not available.") from error
+            raise RuntimeError("PlatformAI request failed.") from error
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
+            raise RuntimeError("PlatformAI request failed.") from error
+
+    def _invoke_platform(self, prompt):
+        config = _read_platform_config(self.platform_config)
+        key = config["PLATFORM_API_KEY"]
+        catalog = self._platform_request("models", key)
+        if not any(item.get("id") == PLATFORM_MODEL for item in catalog.get("data", [])):
+            raise RuntimeError("PlatformAI GPT-5.6 Luna is not available.")
+        response = self._platform_request("responses", key, {
+            "model": PLATFORM_MODEL,
+            "input": prompt,
+            "max_output_tokens": 700,
+            "reasoning": {"effort": "low"},
+        })
+        answer = "".join(
+            content.get("text", "")
+            for item in response.get("output", [])
+            for content in item.get("content", [])
+            if content.get("type") == "output_text"
+        )
+        if response.get("status") != "completed" or not answer:
+            raise RuntimeError("PlatformAI returned an incomplete response.")
+        usage = response.get("usage", {})
+        return answer, usage, response.get("status", "unknown")
+
+    def compare(self, body):
+        prompt = str(body.get("prompt", "")).strip()
+        if not prompt or len(prompt) > 500:
+            raise RuntimeError("Use one public-safe prompt of 1 to 500 characters.")
+        system = "Return concise GitHub-flavored Markdown. Do not claim tool or account access.\n\n"
+        started = time.monotonic()
+        nova_answer, nova_usage, nova_stop = self._invoke("nova2", system + prompt)
+        nova_latency = round((time.monotonic() - started) * 1000)
+        started = time.monotonic()
+        platform_answer, platform_usage, platform_status = self._invoke_platform(system + prompt)
+        platform_latency = round((time.monotonic() - started) * 1000)
+        return {"results": [{
+            "provider": "Amazon Bedrock", "model": NOVA_MODELS["nova2"], "status": "ALLOW",
+            "answer": nova_answer, "latencyMs": nova_latency,
+            "inputTokens": nova_usage.get("inputTokens"), "outputTokens": nova_usage.get("outputTokens"),
+            "completion": nova_stop,
+        }, {
+            "provider": "GovTech PlatformAI", "model": PLATFORM_MODEL, "status": "ALLOW",
+            "answer": platform_answer, "latencyMs": platform_latency,
+            "inputTokens": platform_usage.get("input_tokens"), "outputTokens": platform_usage.get("output_tokens"),
+            "completion": platform_status,
+        }]}
+
     def run(self, body):
         key_name = body.get("model")
         tool = body.get("tool")
@@ -554,7 +651,7 @@ class Issue9Handler(BaseHTTPRequestHandler):
         if path == "/health":
             self._send_json(200, {
                 "status": "ok",
-                "mode": "ISSUE12_CODEX_BEDROCK_KEY",
+                "mode": "ISSUE15_MODEL_COMPARE",
                 "profileAlias": "amit",
                 "region": "ap-southeast-1",
             })
@@ -618,6 +715,16 @@ class Issue9Handler(BaseHTTPRequestHandler):
             except (RuntimeError, json.JSONDecodeError, KeyError, TypeError) as error:
                 self._send_json(409, {"message": str(error)})
             return
+        if path == "/compare":
+            try:
+                content_length = int(self.headers.get("content-length", "0"))
+                if content_length < 1 or content_length > 1024:
+                    raise RuntimeError("Invalid compare request.")
+                body = json.loads(self.rfile.read(content_length))
+                self._send_json(200, self.live_playground.compare(body))
+            except (RuntimeError, json.JSONDecodeError, KeyError, TypeError) as error:
+                self._send_json(409, {"message": str(error)})
+            return
         if path != "/proof":
             self._send_json(404, {"message": "Not found"})
             return
@@ -655,7 +762,7 @@ def main():
 
     signal.signal(signal.SIGINT, stop_server)
     signal.signal(signal.SIGTERM, stop_server)
-    print(f"Issue #12 backend ready at http://127.0.0.1:{port}", flush=True)
+    print(f"Issue #15 backend ready at http://127.0.0.1:{port}", flush=True)
     try:
         server.serve_forever()
     finally:

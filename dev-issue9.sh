@@ -92,6 +92,6 @@ cd "$frontend_dir"
 [[ -d node_modules ]] || npm ci
 export VITE_DEMO_VARIANT=issue9
 export VITE_ISSUE9_API_BASE_URL="http://127.0.0.1:$api_port"
-echo "Starting Issue #12 Codex Bedrock key demo at http://127.0.0.1:$frontend_port"
+echo "Starting Issue #15 model comparison demo at http://127.0.0.1:$frontend_port"
 echo 'The AWS profile remains server-side. Use the GUI button to start the bounded proof.'
 npm run dev -- --host 127.0.0.1 --port "$frontend_port" --strictPort

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { AwsPlaygroundResult, getIssue9Proof, getNovaKeys, Issue9ProofStatus, NovaKeysStatus, revealIssue9Key, revealNovaKey, runAwsPlayground, startIssue9Proof } from './issue9-api';
+import { AwsPlaygroundResult, compareModels, CompareResult, getIssue9Proof, getNovaKeys, Issue9ProofStatus, NovaKeysStatus, revealIssue9Key, revealNovaKey, runAwsPlayground, startIssue9Proof } from './issue9-api';
 
 export const KEY_REVEAL_SECONDS = 15;
 export const nextRevealSeconds = (seconds: number) => Math.max(0, seconds - 1);
@@ -176,23 +176,34 @@ export function Issue9PlaygroundPage() {
   const [tool, setTool] = useState<'ec2' | 'inspector' | 'ssm'>('ec2');
   const [prompt, setPrompt] = useState<string>(toolPrompts.ec2);
   const [result, setResult] = useState<AwsPlaygroundResult | null>(null);
+  const [mode, setMode] = useState<'single' | 'compare'>('single');
+  const [comparePrompt, setComparePrompt] = useState('Explain why a public S3 bucket is a security risk and give three remediation steps.');
+  const [compareResult, setCompareResult] = useState<CompareResult | null>(null);
   const [error, setError] = useState('');
   const [running, setRunning] = useState(false);
   useEffect(() => { setResult(null); setError(''); }, [model, tool, prompt]);
+  useEffect(() => { setCompareResult(null); setError(''); }, [mode, comparePrompt]);
   const run = async () => {
     setRunning(true); setError(''); setResult(null);
     try { setResult(await runAwsPlayground(model, tool, prompt)); }
     catch (caught) { setError(caught instanceof Error ? caught.message : 'Live AWS playground failed.'); }
     finally { setRunning(false); }
   };
+  const compare = async () => {
+    setRunning(true); setError(''); setCompareResult(null);
+    try { setCompareResult(await compareModels(comparePrompt)); }
+    catch (caught) { setError(caught instanceof Error ? caught.message : 'Model comparison failed.'); }
+    finally { setRunning(false); }
+  };
   return (
     <>
-      <div className="page-header-row"><PageHeader eyebrow="Issue #12 live AWS demo" title="Governed model playground" description="A fixed read-only role fetches sanitized AWS facts; the selected Nova model summarizes them. SSM Parameter Store is always denied." /><Badge tone={result?.decision === 'ALLOW' ? 'green' : result?.decision === 'DENY' ? 'gray' : 'amber'}>{result?.decision || 'READY'}</Badge></div>
+      <div className="page-header-row"><PageHeader eyebrow="Issue #15 multi-provider POC" title="Governed model playground" description={mode === 'single' ? 'Use approved Nova models with fixed read-only AWS tools and an explicit SSM deny.' : 'Send one public-safe text prompt to Nova 2 Lite and PlatformAI GPT-5.6 Luna.'} /><Badge tone={(result?.decision === 'ALLOW' || compareResult) ? 'green' : result?.decision === 'DENY' ? 'gray' : 'amber'}>{compareResult ? 'COMPARED' : result?.decision || 'READY'}</Badge></div>
       {error && <div className="error-box">{error}</div>}
-      <section className="playground-grid">
+      <div className="mode-toggle" aria-label="Playground mode"><button className={mode === 'single' ? 'active' : ''} onClick={() => setMode('single')}>Single</button><button className={mode === 'compare' ? 'active' : ''} onClick={() => setMode('compare')}>Compare</button></div>
+      {mode === 'single' ? <section className="playground-grid">
         <article className="panel prompt-panel"><label>Model</label><select value={model} onChange={(event) => setModel(event.target.value as typeof model)}><option value="nova2">Nova 2 Lite</option><option value="nova_pro">Nova Pro</option></select><label>AWS tool</label><select value={tool} onChange={(event) => { const next = event.target.value as typeof tool; setTool(next); setPrompt(toolPrompts[next]); }}><option value="ec2">EC2 inventory</option><option value="inspector">Inspector findings</option><option value="ssm">SSM secret access - deny proof</option></select><label>Question</label><textarea rows={7} value={prompt} disabled={tool === 'ssm'} onChange={(event) => setPrompt(event.target.value)} /><div className="prompt-footer"><small>{tool === 'ssm' ? 'The model is not called and no secret metadata is returned.' : 'Fixed allowlist; no arbitrary AWS commands.'}</small><button className="button button-primary" disabled={running} onClick={() => void run()}>{running ? 'Running...' : tool === 'ssm' ? 'Prove AWS deny' : 'Run live proof'}</button></div></article>
         <article className="panel response-panel"><div className="response-heading"><div><p className="eyebrow">Live result</p><h2>{result ? (result.tool === 'ssm' ? 'AWS IAM policy boundary' : 'Nova summary') : 'Ready'}</h2></div>{result && <Badge tone={result.decision === 'ALLOW' ? 'green' : 'gray'}>{result.decision}</Badge>}</div>{result ? <><div className={result.decision === 'DENY' ? 'error-box denied-response' : 'response-copy'}>{result.decision === 'DENY' ? result.answer : <ReactMarkdown remarkPlugins={[remarkGfm]}>{result.answer}</ReactMarkdown>}</div><div className="metadata-grid"><div><span>Model</span><strong>{result.model}</strong></div><div><span>Sanitized records</span><strong>{result.records.length}</strong></div><div><span>Tokens</span><strong>{result.inputTokens} in / {result.outputTokens} out</strong></div><div><span>Completion</span><strong>{result.stopReason === 'max_tokens' ? 'Truncated' : 'Complete'}</strong></div></div></> : <div className="empty-response"><span>&gt;_</span><strong>Select a model and AWS tool</strong><p>EC2 and Inspector return sanitized facts. SSM must return an AWS IAM deny with zero secret data.</p></div>}</article>
-      </section>
+      </section> : <><article className="panel compare-prompt"><label>Public-safe comparison prompt</label><textarea rows={4} maxLength={500} value={comparePrompt} onChange={(event) => setComparePrompt(event.target.value)} /><div className="prompt-footer"><small>Text only. No AWS inventory or Inspector data is sent to PlatformAI.</small><button className="button button-primary" disabled={running || !comparePrompt.trim()} onClick={() => void compare()}>{running ? 'Comparing...' : 'Compare models'}</button></div></article><section className="compare-grid">{(['Amazon Bedrock', 'GovTech PlatformAI'] as const).map((provider) => { const lane = compareResult?.results.find((item) => item.provider === provider); return <article className="panel compare-card" key={provider}><div className="response-heading"><div><p className="eyebrow">{provider}</p><h2>{provider === 'Amazon Bedrock' ? 'Nova 2 Lite' : 'GPT-5.6 Luna'}</h2></div><Badge tone={lane ? 'green' : 'amber'}>{lane?.status || 'READY'}</Badge></div>{lane ? <><div className="response-copy"><ReactMarkdown remarkPlugins={[remarkGfm]}>{lane.answer}</ReactMarkdown></div><div className="compare-meta"><span>{lane.latencyMs} ms</span><span>{lane.inputTokens ?? '-'} in / {lane.outputTokens ?? '-'} out</span><span>{lane.completion}</span></div></> : <div className="empty-response"><span>&gt;_</span><strong>Waiting for comparison</strong><p>One prompt, one independently returned provider response.</p></div>}</article>; })}</section><div className="notice"><span>i</span><div><strong>Comparison, not benchmark</strong><p>One prompt does not prove that either model is objectively better.</p></div></div></>}
     </>
   );
 }
