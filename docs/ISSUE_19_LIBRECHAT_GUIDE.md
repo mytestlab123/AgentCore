@@ -24,8 +24,9 @@ The adapter exposes only:
 - `POST /v1/chat/completions`
 
 It accepts the latest user text, invokes one fixed Harness, and returns one
-OpenAI-compatible completion. Errors are explicit; no provider or model
-fallback exists.
+OpenAI-compatible completion. When LibreChat requests `stream: true`, it
+returns minimal OpenAI-compatible SSE chunks and closes the stream after
+`[DONE]`. Errors are explicit; no provider or model fallback exists.
 
 ## LibreChat configuration
 

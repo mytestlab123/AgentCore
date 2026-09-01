@@ -38,6 +38,12 @@ class AdapterTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "no text"):
                     adapter.invoke_harness("hello")
 
+    def test_stream_events_use_openai_chunk_shape(self):
+        events = adapter._stream_events("chatcmpl-test", "hello")
+        self.assertEqual(events[0]["object"], "chat.completion.chunk")
+        self.assertEqual(events[0]["choices"][0]["delta"]["content"], "hello")
+        self.assertEqual(events[1]["choices"][0]["finish_reason"], "stop")
+
 
 if __name__ == "__main__":
     unittest.main()

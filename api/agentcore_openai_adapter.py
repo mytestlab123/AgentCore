@@ -40,6 +40,32 @@ def _response(request_id: str, text: str) -> dict[str, Any]:
     }
 
 
+def _stream_events(request_id: str, text: str) -> list[dict[str, Any]]:
+    """Return the two minimal chunks LibreChat expects for stream=true."""
+    return [
+        {
+            "id": request_id,
+            "object": "chat.completion.chunk",
+            "created": 0,
+            "model": "agentcore-nova-2-lite",
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {"role": "assistant", "content": text},
+                    "finish_reason": None,
+                }
+            ],
+        },
+        {
+            "id": request_id,
+            "object": "chat.completion.chunk",
+            "created": 0,
+            "model": "agentcore-nova-2-lite",
+            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+        },
+    ]
+
+
 def _error(message: str) -> dict[str, Any]:
     return {"error": {"message": message, "type": "agentcore_adapter_error"}}
 
@@ -111,6 +137,20 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_stream(self, request_id: str, text: str) -> None:
+        self.send_response(200)
+        self.send_header("content-type", "text/event-stream")
+        self.send_header("cache-control", "no-cache")
+        self.send_header("connection", "close")
+        self.end_headers()
+        for event in _stream_events(request_id, text):
+            body = f"data: {json.dumps(event)}\n\n".encode("utf-8")
+            self.wfile.write(body)
+            self.wfile.flush()
+        self.wfile.write(b"data: [DONE]\n\n")
+        self.wfile.flush()
+        self.close_connection = True
+
     def do_GET(self) -> None:  # noqa: N802
         if self.path == "/v1/models":
             self._send(
@@ -143,7 +183,11 @@ class Handler(BaseHTTPRequestHandler):
         except (RuntimeError, subprocess.TimeoutExpired) as exc:
             self._send(502, _error(str(exc)))
             return
-        self._send(200, _response(f"chatcmpl-{uuid.uuid4().hex}", text))
+        request_id = f"chatcmpl-{uuid.uuid4().hex}"
+        if payload.get("stream") is True:
+            self._send_stream(request_id, text)
+            return
+        self._send(200, _response(request_id, text))
 
     def log_message(self, *_args: Any) -> None:
         return
