@@ -24,6 +24,7 @@ AGENTCORE_CLI = os.environ.get(
     "/home/user/.local/share/agentcore-cli/node_modules/.bin/agentcore",
 )
 MODEL_ID = "global.amazon.nova-2-lite-v1:0"
+HARNESS_MAX_TOKENS = os.environ.get("AGENTCORE_MAX_TOKENS", "6000")
 PLATFORM_BASE_URL = os.environ.get("PLATFORM_API_BASE_URL", "https://api-public.ai.tech.gov.sg")
 PLATFORM_CONFIG = os.environ.get("PLATFORM_CONFIG", "/etc/agentcore-issue19/platformai.env")
 PLATFORM_MODELS = {
@@ -189,6 +190,8 @@ def invoke_harness(prompt: str) -> str:
             str(uuid.uuid4()),
             "--json",
             "--verbose",
+            "--max-tokens",
+            HARNESS_MAX_TOKENS,
             prompt,
         ],
         check=False,

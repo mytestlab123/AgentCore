@@ -28,6 +28,8 @@ class AdapterTests(unittest.TestCase):
             command = run.call_args.args[0]
             self.assertIn("invoke", command)
             self.assertIn("--harness-arn", command)
+            self.assertIn("--max-tokens", command)
+            self.assertIn("6000", command)
             self.assertNotIn("bedrock-runtime", " ".join(command))
 
     def test_empty_harness_output_fails_closed(self):
