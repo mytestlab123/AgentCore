@@ -574,24 +574,33 @@ class LiveAwsPlayground:
             self.platform_authorized_models = {item.get("id") for item in catalog.get("data", [])}
         if model not in self.platform_authorized_models:
             raise RuntimeError(f"NOT AVAILABLE: PlatformAI model {model} is unavailable.")
-        payload = {
-            "model": model,
-            "input": prompt,
-            "max_output_tokens": 3000 if model == PLATFORM_GEMINI_MODEL else 700,
-        }
-        if model == PLATFORM_MODEL:
-            payload["reasoning"] = {"effort": "low"}
-        response = self._platform_request("responses", key, payload)
-        answer = "".join(
-            content.get("text", "")
-            for item in response.get("output", [])
-            for content in item.get("content", [])
-            if content.get("type") == "output_text"
-        )
-        if response.get("status") != "completed" or not answer:
-            raise RuntimeError("ERROR: PlatformAI returned an incomplete response.")
-        usage = response.get("usage", {})
-        return answer, usage, response.get("status", "unknown")
+        last_answer = ""
+        last_usage = {}
+        last_status = "unknown"
+        attempts = 2 if model == PLATFORM_GEMINI_MODEL else 1
+        for attempt in range(attempts):
+            concise_prefix = "Keep the complete answer below 180 words. " if attempt else ""
+            payload = {
+                "model": model,
+                "input": concise_prefix + prompt,
+                "max_output_tokens": 6000 if attempt else (3000 if model == PLATFORM_GEMINI_MODEL else 700),
+            }
+            if model == PLATFORM_MODEL:
+                payload["reasoning"] = {"effort": "low"}
+            response = self._platform_request("responses", key, payload)
+            last_answer = "".join(
+                content.get("text", "")
+                for item in response.get("output", [])
+                for content in item.get("content", [])
+                if content.get("type") == "output_text"
+            )
+            last_usage = response.get("usage", {})
+            last_status = response.get("status", "unknown")
+            if last_status == "completed" and last_answer:
+                return last_answer, last_usage, last_status
+        if last_answer:
+            return last_answer, last_usage, last_status
+        raise RuntimeError("ERROR: PlatformAI returned no response text.")
 
     def platform_tool(self, body):
         prompt = str(body.get("prompt", "")).strip()

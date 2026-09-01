@@ -100,6 +100,35 @@ class Issue9DemoStatusTests(unittest.TestCase):
         self.assertNotIn("real-name-must-not-leave", json.dumps(controller.payload))
         self.assertNotIn("reasoning", controller.payload)
 
+    def test_gemini_retries_one_incomplete_response_with_concise_prompt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "config.env"
+            config.write_text(
+                'PLATFORM_API_KEY="secret"\nPLATFORM_API_BASE_URL="https://api-public.ai.tech.gov.sg"\nPLATFORM_AI_MODEL="gpt-5.6-luna"\n',
+                encoding="utf-8",
+            )
+            config.chmod(0o600)
+
+            class GeminiRetryPlayground(LiveAwsPlayground):
+                response_calls = 0
+
+                def _platform_request(self, path, key, payload=None):
+                    if path == "models":
+                        return {"data": [{"id": "gemini-2.5-flash"}]}
+                    self.response_calls += 1
+                    self.last_payload = payload
+                    if self.response_calls == 1:
+                        return {"status": "incomplete", "output": [{"content": [{"type": "output_text", "text": "Partial"}]}]}
+                    return {"status": "completed", "output": [{"content": [{"type": "output_text", "text": "Complete answer"}]}]}
+
+            controller = GeminiRetryPlayground(platform_config=config)
+            answer, _, status = controller._invoke_platform("Summarize evidence.", "gemini-2.5-flash")
+
+        self.assertEqual(answer, "Complete answer")
+        self.assertEqual(status, "completed")
+        self.assertEqual(controller.response_calls, 2)
+        self.assertTrue(controller.last_payload["input"].startswith("Keep the complete answer below 180 words."))
+
     def test_nova_key_status_uses_fingerprint_not_secret_prefix(self):
         with tempfile.TemporaryDirectory() as directory:
             env_file = Path(directory) / ".env"
