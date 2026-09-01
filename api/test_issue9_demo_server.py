@@ -7,10 +7,26 @@ import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
-from issue9_demo_server import CodexKeyController, Issue9Handler, ProofController, build_public_status
+from issue9_demo_server import CodexKeyController, Issue9Handler, LiveAwsPlayground, ProofController, build_public_status
 
 
 class Issue9DemoStatusTests(unittest.TestCase):
+    def test_nova_key_status_uses_fingerprint_not_secret_prefix(self):
+        with tempfile.TemporaryDirectory() as directory:
+            env_file = Path(directory) / ".env"
+            env_file.write_text("nova2=secret-nova-two\nnova_pro=secret-nova-pro\n", encoding="utf-8")
+            env_file.chmod(0o600)
+
+            status = LiveAwsPlayground(key_env=env_file).key_status()
+
+        self.assertTrue(status["keys"]["nova2"]["available"])
+        self.assertTrue(status["keys"]["nova2"]["masked"].startswith("bedrock-"))
+        self.assertNotIn("secret-nova", json.dumps(status))
+
+    def test_nova_key_reveal_rejects_unknown_name(self):
+        with self.assertRaisesRegex(RuntimeError, "Unknown Nova"):
+            LiveAwsPlayground().reveal_key("unknown")
+
     def test_codex_key_status_is_masked_and_model_scoped(self):
         with tempfile.TemporaryDirectory() as directory:
             retained = Path(directory)

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { createCodexKey, getCodexKey, getIssue9Proof, Issue9ProofStatus, revealCodexKey, revealIssue9Key, startIssue9Proof } from './issue9-api';
+import { AwsPlaygroundResult, getIssue9Proof, getNovaKeys, Issue9ProofStatus, NovaKeysStatus, revealIssue9Key, revealNovaKey, runAwsPlayground, startIssue9Proof } from './issue9-api';
 
 export const KEY_REVEAL_SECONDS = 15;
 export const nextRevealSeconds = (seconds: number) => Math.max(0, seconds - 1);
@@ -46,10 +46,8 @@ export function Issue9HomePage() {
   const { status, setStatus, error, setError } = useProofStatus();
   const [revealedKey, setRevealedKey] = useState('');
   const [revealSeconds, setRevealSeconds] = useState(0);
-  const [codexStatus, setCodexStatus] = useState<Awaited<ReturnType<typeof getCodexKey>> | null>(null);
-  const [codexModel, setCodexModel] = useState('openai.gpt-5.6-terra');
-  const [codexKey, setCodexKey] = useState('');
-  const [codexSeconds, setCodexSeconds] = useState(0);
+  const [novaKeys, setNovaKeys] = useState<NovaKeysStatus | null>(null);
+  const [visibleNova, setVisibleNova] = useState<{ name: 'nova2' | 'nova_pro'; key: string; seconds: number } | null>(null);
   const start = async () => {
     setError('');
     try { setStatus(await startIssue9Proof()); }
@@ -72,8 +70,8 @@ export function Issue9HomePage() {
     let active = true;
     const refresh = async () => {
       try {
-        const next = await getCodexKey();
-        if (active) setCodexStatus(next);
+        const next = await getNovaKeys();
+        if (active) setNovaKeys(next);
       } catch { /* Main proof error handling remains separate. */ }
     };
     void refresh();
@@ -81,13 +79,13 @@ export function Issue9HomePage() {
     return () => { active = false; window.clearInterval(timer); };
   }, []);
   useEffect(() => {
-    if (!codexKey || codexSeconds <= 0) return;
+    if (!visibleNova || visibleNova.seconds <= 0) return;
     const timer = window.setTimeout(() => {
-      if (codexSeconds === 1) { setCodexKey(''); setCodexSeconds(0); }
-      else setCodexSeconds(nextRevealSeconds);
+      if (visibleNova.seconds === 1) setVisibleNova(null);
+      else setVisibleNova({ ...visibleNova, seconds: nextRevealSeconds(visibleNova.seconds) });
     }, 1000);
     return () => window.clearTimeout(timer);
-  }, [codexKey, codexSeconds]);
+  }, [visibleNova]);
 
   const reveal = async () => {
     setError('');
@@ -105,22 +103,16 @@ export function Issue9HomePage() {
     try { await navigator.clipboard.writeText(revealedKey); }
     catch { setError('Clipboard access failed. Select and copy the revealed key manually.'); }
   };
-  const generateCodexKey = async () => {
-    setError('');
-    try { setCodexStatus(await createCodexKey(codexModel.trim())); }
-    catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not create the Codex key.'); }
-  };
-  const revealCodex = async () => {
+  const revealNova = async (name: 'nova2' | 'nova_pro') => {
     setError('');
     try {
-      const result = await revealCodexKey();
-      setCodexKey(result.key);
-      setCodexSeconds(Math.min(result.expiresInSeconds, KEY_REVEAL_SECONDS));
-    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not reveal the Codex key.'); }
+      const result = await revealNovaKey(name);
+      setVisibleNova({ name, key: result.key, seconds: Math.min(result.expiresInSeconds, KEY_REVEAL_SECONDS) });
+    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not reveal the Nova key.'); }
   };
-  const copyCodex = async () => {
-    if (!codexKey) return;
-    try { await navigator.clipboard.writeText(codexKey); }
+  const copyNova = async () => {
+    if (!visibleNova) return;
+    try { await navigator.clipboard.writeText(visibleNova.key); }
     catch { setError('Clipboard access failed. Select and copy the revealed key manually.'); }
   };
 
@@ -131,21 +123,18 @@ export function Issue9HomePage() {
         <div className="hero-flow"><div className="flow-node"><small>Local operator backend</small><strong>amit / ap-southeast-1</strong></div><span className="flow-arrow">-&gt;</span><div className="flow-node flow-node-accent"><small>Bedrock API key</small><strong>{status?.key.masked || 'Secret stays server-side'}</strong></div><span className="flow-arrow">-&gt;</span><div className="flow-node"><small>AWS policy</small><strong>Nova Lite ALLOW / Nova Pro DENY</strong></div></div>
       </section>
 
-      <article className="panel codex-key-card">
-        <div className="key-card-top"><div><p className="eyebrow">Issue #12 developer credential</p><h2>Codex AI key</h2></div><Badge tone={codexStatus?.state === 'CREATED' ? 'green' : codexStatus?.state === 'FAIL' ? 'gray' : 'amber'}>{codexStatus?.state || 'READY'}</Badge></div>
-        <p className="card-copy">Create one separate 30-day Bedrock service-specific credential for an explicitly selected OpenAI model. No automatic model or Region fallback.</p>
-        <div className="codex-key-controls">
-          <label><span>Exact Bedrock model ID</span><input value={codexModel} disabled={codexStatus?.state === 'RUNNING' || codexStatus?.state === 'CREATED'} onChange={(event) => setCodexModel(event.target.value)} /></label>
-          <button className="button button-primary" type="button" disabled={codexStatus?.state === 'RUNNING' || codexStatus?.state === 'CREATED'} onClick={() => void generateCodexKey()}>{codexStatus?.state === 'RUNNING' ? 'Creating...' : codexStatus?.state === 'CREATED' ? 'Codex key created' : 'Create Codex AI key'}</button>
-        </div>
-        <code>{codexKey || codexStatus?.masked || 'bedrock-********'}</code>
-        <div className="key-actions">
-          <button className="button button-secondary compact" type="button" disabled={codexStatus?.state !== 'CREATED' || Boolean(codexKey)} onClick={() => void revealCodex()}>Reveal Codex key</button>
-          <button className="button button-primary compact" type="button" disabled={!codexKey} onClick={() => void copyCodex()}>Copy for another Codex</button>
-          <small>{codexKey ? `Masks in ${codexSeconds}s` : codexStatus?.message || 'Not created'}</small>
-        </div>
-        <div className="notice compact-notice"><span>i</span><div><strong>Next step</strong><p>Copy the key, then follow docs/CODEX_BEDROCK_KEY_DEMO.md. The wrapper uses hidden input and does not alter normal Codex login.</p></div></div>
-      </article>
+      <section className="issue9-results">
+        {(['nova2', 'nova_pro'] as const).map((name) => {
+          const item = novaKeys?.keys[name];
+          const shown = visibleNova?.name === name ? visibleNova.key : item?.masked;
+          return <article className="panel codex-key-card" key={name}>
+            <div className="key-card-top"><div><p className="eyebrow">Retained developer credential</p><h2>{name === 'nova2' ? 'Nova 2 Lite key' : 'Nova Pro key'}</h2></div><Badge tone={item?.available ? 'green' : 'amber'}>{item?.available ? 'READY' : 'MISSING'}</Badge></div>
+            <p className="card-copy">Model-scoped Bedrock bearer key. It remains server-side until explicit reveal and is never stored by the browser.</p>
+            <code>{shown || 'bedrock-********'}</code>
+            <div className="key-actions"><button className="button button-secondary compact" disabled={!item?.available || Boolean(visibleNova)} onClick={() => void revealNova(name)}>Reveal key</button><button className="button button-primary compact" disabled={visibleNova?.name !== name} onClick={() => void copyNova()}>Copy key</button><small>{visibleNova?.name === name ? `Masks in ${visibleNova.seconds}s` : item?.model}</small></div>
+          </article>;
+        })}
+      </section>
 
       <section className="issue9-control-grid">
         <article className="panel key-card issue9-key-card">
@@ -176,23 +165,25 @@ export function Issue9HomePage() {
 }
 
 export function Issue9PlaygroundPage() {
-  const { status, error } = useProofStatus();
+  const [model, setModel] = useState<'nova2' | 'nova_pro'>('nova2');
+  const [tool, setTool] = useState<'ec2' | 'inspector' | 'ssm'>('ec2');
+  const [prompt, setPrompt] = useState('Summarize the most important operational facts in three concise bullets.');
+  const [result, setResult] = useState<AwsPlaygroundResult | null>(null);
+  const [error, setError] = useState('');
+  const [running, setRunning] = useState(false);
+  const run = async () => {
+    setRunning(true); setError(''); setResult(null);
+    try { setResult(await runAwsPlayground(model, tool, prompt)); }
+    catch (caught) { setError(caught instanceof Error ? caught.message : 'Live AWS playground failed.'); }
+    finally { setRunning(false); }
+  };
   return (
     <>
-      <div className="page-header-row"><PageHeader eyebrow="Real AWS decisions" title="Model proof" description="The same native Bedrock credential must reach Nova Lite and be blocked from Nova Pro by AWS IAM." /><Badge tone={status?.state === 'PASS' ? 'green' : 'amber'}>{status?.state || 'Connecting'}</Badge></div>
+      <div className="page-header-row"><PageHeader eyebrow="Issue #12 live AWS demo" title="Governed model playground" description="A fixed read-only role fetches sanitized AWS facts; the selected Nova model summarizes them. SSM Parameter Store is always denied." /><Badge tone={result?.decision === 'ALLOW' ? 'green' : result?.decision === 'DENY' ? 'gray' : 'amber'}>{result?.decision || 'READY'}</Badge></div>
       {error && <div className="error-box">{error}</div>}
-      {!status?.allowed && !status?.denied ? <div className="notice"><span>i</span><div><strong>No live proof yet</strong><p>Start the bounded proof from Project. Results appear here while it runs.</p></div></div> : null}
-      <section className="issue9-results">
-        <article className="panel proof-result" data-testid="issue9-allow">
-          <div className="response-heading"><div><p className="eyebrow">Approved model</p><h2>Amazon Nova Lite</h2></div><Badge tone={status?.allowed?.httpStatus === 200 ? 'green' : 'amber'}>{status?.allowed ? `ALLOW ${status.allowed.httpStatus}` : 'Pending'}</Badge></div>
-          <div className="response-copy">{status?.allowed?.response || 'Waiting for a real Bedrock response.'}</div>
-          <div className="metadata-grid"><div><span>Model</span><strong>{status?.allowed?.model || 'apac.amazon.nova-lite-v1:0'}</strong></div><div><span>Tokens</span><strong>{status?.allowed ? `${status.allowed.inputTokens} in / ${status.allowed.outputTokens} out` : '-'}</strong></div><div><span>Request proof</span><strong className="mono">{status?.allowed?.requestIdSha256?.slice(0, 12) || '-'}</strong></div></div>
-        </article>
-        <article className="panel proof-result" data-testid="issue9-deny">
-          <div className="response-heading"><div><p className="eyebrow">Restricted model</p><h2>Amazon Nova Pro</h2></div><Badge tone={status?.denied?.httpStatus === 403 ? 'gray' : 'amber'}>{status?.denied ? `DENY ${status.denied.httpStatus}` : 'Pending'}</Badge></div>
-          <div className="error-box denied-response">{status?.denied ? 'Access denied by AWS IAM. The application did not fake this result.' : 'Waiting for the restricted-model test.'}</div>
-          <div className="metadata-grid"><div><span>Model</span><strong>{status?.denied?.model || 'apac.amazon.nova-pro-v1:0'}</strong></div><div><span>Enforced by</span><strong>{status?.denied?.enforcedBy || '-'}</strong></div><div><span>Request proof</span><strong className="mono">{status?.denied?.requestIdSha256?.slice(0, 12) || '-'}</strong></div></div>
-        </article>
+      <section className="playground-grid">
+        <article className="panel prompt-panel"><label>Model</label><select value={model} onChange={(event) => setModel(event.target.value as typeof model)}><option value="nova2">Nova 2 Lite</option><option value="nova_pro">Nova Pro</option></select><label>AWS tool</label><select value={tool} onChange={(event) => setTool(event.target.value as typeof tool)}><option value="ec2">EC2 inventory</option><option value="inspector">Inspector findings</option><option value="ssm">SSM secret access - deny proof</option></select><label>Question</label><textarea rows={7} value={prompt} onChange={(event) => setPrompt(event.target.value)} /><div className="prompt-footer"><small>Fixed allowlist; no arbitrary AWS commands.</small><button className="button button-primary" disabled={running} onClick={() => void run()}>{running ? 'Running...' : 'Run live proof'}</button></div></article>
+        <article className="panel response-panel"><div className="response-heading"><div><p className="eyebrow">Live result</p><h2>{result ? (result.tool === 'ssm' ? 'AWS IAM policy boundary' : 'Nova summary') : 'Ready'}</h2></div>{result && <Badge tone={result.decision === 'ALLOW' ? 'green' : 'gray'}>{result.decision}</Badge>}</div>{result ? <><div className={result.decision === 'DENY' ? 'error-box denied-response' : 'response-copy'}>{result.answer}</div><div className="metadata-grid"><div><span>Model</span><strong>{result.model}</strong></div><div><span>Sanitized records</span><strong>{result.records.length}</strong></div><div><span>Tokens</span><strong>{result.inputTokens} in / {result.outputTokens} out</strong></div></div></> : <div className="empty-response"><span>&gt;_</span><strong>Select a model and AWS tool</strong><p>EC2 and Inspector return sanitized facts. SSM must return an AWS IAM deny with zero secret data.</p></div>}</article>
       </section>
     </>
   );

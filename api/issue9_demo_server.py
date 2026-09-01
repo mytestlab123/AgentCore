@@ -18,8 +18,35 @@ CODEX_KEY_SCRIPT = REPO_DIR / "scripts" / "create-codex-bedrock-key.sh"
 DEFAULT_EVIDENCE_ROOT = Path.home() / ".AGENTS-temp" / "AgentCore" / "issue9-gui"
 DEFAULT_RETAINED_CREDENTIAL = Path.home() / ".AGENTS-temp" / "AgentCore" / "issue9-retained" / "credential.json"
 DEFAULT_CODEX_RETAINED_DIR = Path.home() / ".AGENTS-temp" / "AgentCore" / "issue12-codex-key"
+DEFAULT_KEY_ENV = Path("/home/user/git/awsops/.env")
+LIVE_DEMO_ROLE = "agentcore-live-demo-readonly-role-r1"
 ALLOWED_MODEL = "apac.amazon.nova-lite-v1:0"
 RESTRICTED_MODEL = "apac.amazon.nova-pro-v1:0"
+NOVA_MODELS = {
+    "nova2": "global.amazon.nova-2-lite-v1:0",
+    "nova_pro": "apac.amazon.nova-pro-v1:0",
+}
+
+
+def _read_env_value(path, name):
+    try:
+        if path.stat().st_mode & 0o077:
+            raise RuntimeError("The retained key file must have mode 600.")
+        for raw_line in path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if line.startswith("export "):
+                line = line[7:]
+            if line.startswith(f"{name}="):
+                value = line.split("=", 1)[1].strip().strip("'\"")
+                if value:
+                    return value
+    except OSError as error:
+        raise RuntimeError("The retained Nova key file is unavailable.") from error
+    raise RuntimeError(f"The retained {name} key is unavailable.")
+
+
+def _masked_key(value):
+    return f"bedrock-{hashlib.sha256(value.encode('utf-8')).hexdigest()[:12]}********" if value else None
 
 
 def _read_json(path):
@@ -363,9 +390,132 @@ class CodexKeyController:
                 return
 
 
+class LiveAwsPlayground:
+    def __init__(self, key_env=DEFAULT_KEY_ENV, profile="amit", region="ap-southeast-1"):
+        self.key_env = Path(key_env)
+        self.profile = profile
+        self.region = region
+
+    def key_status(self):
+        keys = {}
+        for name, model in NOVA_MODELS.items():
+            try:
+                value = _read_env_value(self.key_env, name)
+                keys[name] = {"available": True, "masked": _masked_key(value), "model": model}
+            except RuntimeError:
+                keys[name] = {"available": False, "masked": None, "model": model}
+        return {"keys": keys, "expiresInSeconds": 15}
+
+    def reveal_key(self, name):
+        if name not in NOVA_MODELS:
+            raise RuntimeError("Unknown Nova key.")
+        return {"key": _read_env_value(self.key_env, name), "expiresInSeconds": 15}
+
+    def _aws(self, arguments, env=None):
+        command = ["aws", *arguments, "--region", self.region, "--output", "json", "--no-cli-pager"]
+        completed = subprocess.run(
+            command, env=env, capture_output=True, text=True, timeout=30, check=False
+        )
+        if completed.returncode:
+            raise RuntimeError("AWS operation failed.")
+        return json.loads(completed.stdout or "{}")
+
+    def _role_env(self):
+        identity = self._aws(["sts", "get-caller-identity", "--profile", self.profile])
+        role_arn = f"arn:aws:iam::{identity['Account']}:role/{LIVE_DEMO_ROLE}"
+        assumed = self._aws([
+            "sts", "assume-role", "--profile", self.profile, "--role-arn", role_arn,
+            "--role-session-name", "AgentCoreLiveDemo",
+        ])
+        credentials = assumed["Credentials"]
+        env = os.environ.copy()
+        env.pop("AWS_PROFILE", None)
+        env.update({
+            "AWS_ACCESS_KEY_ID": credentials["AccessKeyId"],
+            "AWS_SECRET_ACCESS_KEY": credentials["SecretAccessKey"],
+            "AWS_SESSION_TOKEN": credentials["SessionToken"],
+            "AWS_REGION": self.region,
+        })
+        return env
+
+    def _source(self, tool, env):
+        if tool == "ec2":
+            payload = self._aws(["ec2", "describe-instances"], env)
+            records = []
+            for reservation in payload.get("Reservations", []):
+                for instance in reservation.get("Instances", []):
+                    tags = {tag.get("Key"): tag.get("Value") for tag in instance.get("Tags", [])}
+                    records.append({
+                        "instanceAlias": tags.get("Name", "unnamed"),
+                        "state": instance.get("State", {}).get("Name", "unknown"),
+                        "instanceType": instance.get("InstanceType", "unknown"),
+                        "platform": instance.get("PlatformDetails", "unknown"),
+                    })
+            return records[:20]
+        if tool == "inspector":
+            payload = self._aws(["inspector2", "list-findings", "--max-results", "20"], env)
+            return [{
+                "title": finding.get("title", "Untitled finding"),
+                "severity": finding.get("severity", "UNKNOWN"),
+                "status": finding.get("status", "UNKNOWN"),
+                "resourceType": (finding.get("resources") or [{}])[0].get("type", "UNKNOWN"),
+            } for finding in payload.get("findings", [])]
+        if tool == "ssm":
+            completed = subprocess.run(
+                ["aws", "ssm", "describe-parameters", "--max-results", "1", "--region", self.region,
+                 "--output", "json", "--no-cli-pager"],
+                env=env, capture_output=True, text=True, timeout=30, check=False,
+            )
+            if completed.returncode == 0:
+                raise RuntimeError("Safety failure: SSM Parameter Store was not denied.")
+            if "AccessDenied" not in completed.stderr:
+                raise RuntimeError("SSM deny proof did not return AccessDenied.")
+            return []
+        raise RuntimeError("Unknown AWS tool.")
+
+    def _invoke(self, key_name, prompt):
+        key = _read_env_value(self.key_env, key_name)
+        model = NOVA_MODELS[key_name]
+        body = json.dumps({
+            "messages": [{"role": "user", "content": [{"text": prompt}]}],
+            "inferenceConfig": {"maxTokens": 500, "temperature": 0.1},
+        })
+        completed = subprocess.run([
+            "curl", "--silent", "--show-error", "--fail-with-body", "--max-time", "60",
+            "-H", f"Authorization: Bearer {key}", "-H", "content-type: application/json",
+            "-d", body,
+            f"https://bedrock-runtime.{self.region}.amazonaws.com/model/{model}/converse",
+        ], capture_output=True, text=True, timeout=70, check=False)
+        if completed.returncode:
+            raise RuntimeError("Bedrock model invocation failed.")
+        response = json.loads(completed.stdout)
+        text = response["output"]["message"]["content"][0]["text"]
+        usage = response.get("usage", {})
+        return text, usage
+
+    def run(self, body):
+        key_name = body.get("model")
+        tool = body.get("tool")
+        question = str(body.get("prompt", "")).strip()[:500]
+        if key_name not in NOVA_MODELS or tool not in {"ec2", "inspector", "ssm"}:
+            raise RuntimeError("Choose one supported model and AWS tool.")
+        records = self._source(tool, self._role_env())
+        if tool == "ssm":
+            return {"decision": "DENY", "tool": tool, "model": NOVA_MODELS[key_name],
+                    "records": [], "answer": "AWS IAM explicitly denied SSM Parameter Store. No parameter names or values were returned.",
+                    "inputTokens": 0, "outputTokens": 0}
+        default_question = "Summarize the most important operational facts in three concise bullets."
+        prompt = (question or default_question) + "\nUse only this sanitized AWS data:\n" + json.dumps(records)
+        answer, usage = self._invoke(key_name, prompt)
+        return {"decision": "ALLOW", "tool": tool, "model": NOVA_MODELS[key_name],
+                "records": records, "answer": answer,
+                "inputTokens": usage.get("inputTokens", 0), "outputTokens": usage.get("outputTokens", 0)}
+
+
 class Issue9Handler(BaseHTTPRequestHandler):
     controller = None
     codex_controller = None
+    live_playground = None
     allowed_origins = {
         "http://localhost:5173",
         "http://localhost:5174",
@@ -409,6 +559,9 @@ class Issue9Handler(BaseHTTPRequestHandler):
         if path == "/codex-key":
             self._send_json(200, self.codex_controller.status())
             return
+        if path == "/nova-keys":
+            self._send_json(200, self.live_playground.key_status())
+            return
         self._send_json(404, {"message": "Not found"})
 
     def do_POST(self):
@@ -442,6 +595,23 @@ class Issue9Handler(BaseHTTPRequestHandler):
             except (RuntimeError, json.JSONDecodeError) as error:
                 self._send_json(409, {"message": str(error)})
             return
+        if path.startswith("/nova-keys/") and path.endswith("/reveal"):
+            try:
+                name = path.split("/")[2]
+                self._send_json(200, self.live_playground.reveal_key(name))
+            except RuntimeError as error:
+                self._send_json(409, {"message": str(error)})
+            return
+        if path == "/aws-playground":
+            try:
+                content_length = int(self.headers.get("content-length", "0"))
+                if content_length < 1 or content_length > 2048:
+                    raise RuntimeError("Invalid playground request.")
+                body = json.loads(self.rfile.read(content_length))
+                self._send_json(200, self.live_playground.run(body))
+            except (RuntimeError, json.JSONDecodeError, KeyError, TypeError) as error:
+                self._send_json(409, {"message": str(error)})
+            return
         if path != "/proof":
             self._send_json(404, {"message": "Not found"})
             return
@@ -469,6 +639,7 @@ def main():
     controller = ProofController()
     Issue9Handler.controller = controller
     Issue9Handler.codex_controller = CodexKeyController()
+    Issue9Handler.live_playground = LiveAwsPlayground()
     server = ThreadingHTTPServer(("127.0.0.1", port), Issue9Handler)
 
     def stop_server(_signum, _frame):
