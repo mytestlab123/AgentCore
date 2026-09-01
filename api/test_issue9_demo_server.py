@@ -86,19 +86,24 @@ class Issue9DemoStatusTests(unittest.TestCase):
 
                 def _platform_request(self, path, key, payload=None):
                     if path == "models":
-                        return {"data": [{"id": "azure.claude-haiku-4-5"}, {"id": "gemini-2.5-flash"}]}
+                        return {"data": [{"id": "gpt-5.6-luna"}, {"id": "azure.claude-haiku-4-5"}, {"id": "gemini-3.5-flash"}]}
                     self.payload = payload
                     return {"status": "completed", "output": [{"content": [{"type": "output_text", "text": "Safe answer"}]}],
                             "usage": {"input_tokens": 9, "output_tokens": 4}}
 
             controller = ClaudePlayground(platform_config=config)
-            result = controller.platform_tool({"model": "gemini-2.5-flash", "tool": "ec2", "prompt": "Summarize."})
+            result = controller.platform_tool({"model": "gemini-3.5-flash", "tool": "ec2", "prompt": "Summarize."})
+            gemini_payload = controller.payload
+            luna_result = controller.platform_tool({"model": "gpt-5.6-luna", "tool": "ec2", "prompt": "Summarize."})
 
-        self.assertEqual(result["model"], "gemini-2.5-flash")
+        self.assertEqual(result["model"], "gemini-3.5-flash")
+        self.assertEqual(luna_result["model"], "gpt-5.6-luna")
         self.assertEqual(result["tool"], "ec2")
         self.assertEqual(result["records"][0]["instanceAlias"], "instance-1")
         self.assertNotIn("real-name-must-not-leave", json.dumps(controller.payload))
-        self.assertNotIn("reasoning", controller.payload)
+        self.assertNotIn("reasoning", gemini_payload)
+        self.assertEqual(controller.payload["reasoning"], {"effort": "low"})
+        self.assertEqual(controller.payload["max_output_tokens"], 3000)
 
     def test_gemini_retries_one_incomplete_response_with_concise_prompt(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -114,7 +119,7 @@ class Issue9DemoStatusTests(unittest.TestCase):
 
                 def _platform_request(self, path, key, payload=None):
                     if path == "models":
-                        return {"data": [{"id": "gemini-2.5-flash"}]}
+                        return {"data": [{"id": "gemini-3.5-flash"}]}
                     self.response_calls += 1
                     self.last_payload = payload
                     if self.response_calls == 1:
@@ -122,7 +127,7 @@ class Issue9DemoStatusTests(unittest.TestCase):
                     return {"status": "completed", "output": [{"content": [{"type": "output_text", "text": "Complete answer"}]}]}
 
             controller = GeminiRetryPlayground(platform_config=config)
-            answer, _, status = controller._invoke_platform("Summarize evidence.", "gemini-2.5-flash")
+            answer, _, status = controller._invoke_platform("Summarize evidence.", "gemini-3.5-flash")
 
         self.assertEqual(answer, "Complete answer")
         self.assertEqual(status, "completed")

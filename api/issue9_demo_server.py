@@ -34,7 +34,7 @@ NOVA_MODELS = {
 }
 PLATFORM_MODEL = "gpt-5.6-luna"
 PLATFORM_CLAUDE_MODEL = "azure.claude-haiku-4-5"
-PLATFORM_GEMINI_MODEL = "gemini-2.5-flash"
+PLATFORM_GEMINI_MODEL = "gemini-3.5-flash"
 PLATFORM_BASE_URL = "https://api-public.ai.tech.gov.sg"
 
 
@@ -577,13 +577,14 @@ class LiveAwsPlayground:
         last_answer = ""
         last_usage = {}
         last_status = "unknown"
-        attempts = 2 if model == PLATFORM_GEMINI_MODEL else 1
+        retry_models = {PLATFORM_MODEL, PLATFORM_GEMINI_MODEL}
+        attempts = 2 if model in retry_models else 1
         for attempt in range(attempts):
             concise_prefix = "Keep the complete answer below 180 words. " if attempt else ""
             payload = {
                 "model": model,
                 "input": concise_prefix + prompt,
-                "max_output_tokens": 6000 if attempt else (3000 if model == PLATFORM_GEMINI_MODEL else 700),
+                "max_output_tokens": 6000 if attempt else (3000 if model in retry_models else 700),
             }
             if model == PLATFORM_MODEL:
                 payload["reasoning"] = {"effort": "low"}
@@ -606,7 +607,7 @@ class LiveAwsPlayground:
         prompt = str(body.get("prompt", "")).strip()
         model = body.get("model")
         tool = body.get("tool")
-        if model not in {PLATFORM_CLAUDE_MODEL, PLATFORM_GEMINI_MODEL} or tool not in {"ec2", "inspector", "ssm"}:
+        if model not in {PLATFORM_MODEL, PLATFORM_CLAUDE_MODEL, PLATFORM_GEMINI_MODEL} or tool not in {"ec2", "inspector", "ssm"}:
             raise RuntimeError("Use one approved PlatformAI model and AWS tool.")
         if not prompt or len(prompt) > 500:
             raise RuntimeError("Use a prompt of 1 to 500 characters.")
