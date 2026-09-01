@@ -1,0 +1,10 @@
+version: 1.2.1
+endpoints:
+  custom:
+    - name: AgentCore
+      apiKey: local-poc-placeholder
+      baseURL: http://127.0.0.1:3081/v1
+      models:
+        default:
+          - agentcore-nova-2-lite
+      fetch: false

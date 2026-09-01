@@ -7,7 +7,7 @@ script=$repo_dir/scripts/harness-mvp.sh
 
 /usr/bin/bash -n "$script"
 plan=$(AWS_PROFILE=amit "$script" --plan)
-rg -q 'Issue #17 AgentCore Harness MVP' <<<"$plan"
+rg -q 'Issue #19 AgentCore Harness MVP' <<<"$plan"
 rg -q 'Tools: none' <<<"$plan"
 rg -q 'Memory: disabled' <<<"$plan"
 rg -q 'Lifecycle: always delete' <<<"$plan"
