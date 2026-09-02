@@ -1,0 +1,38 @@
+version: 1.2.1
+
+# Copy this example into the LibreChat deployment configuration and replace
+# the absolute paths with paths on that host.
+mcpServers:
+  agentcore_governance:
+    command: /usr/bin/python3
+    args:
+      - /absolute/path/to/AgentCore/integration/librechat-governance/demo_mcp_server.py
+    env:
+      GOVERNANCE_STATE_FILE: /absolute/path/to/private/agentcore-governance/state.json
+    chatMenu: false
+
+endpoints:
+  agents:
+    disableBuilder: true
+    capabilities:
+      - tools
+      - ask_user_question
+    toolApproval:
+      enabled: true
+      mode: default
+      allow:
+        - mcp:agentcore_governance:check_security_finding
+      ask:
+        - mcp:agentcore_governance:apply_demo_remediation
+      deny:
+        - mcp:agentcore_governance:delete_demo_asset
+      reason: Native governance demo: read-only checks allow, remediation asks, deletion denies.
+      hooks:
+        - matcher: mcp:agentcore_governance:apply_demo_remediation
+          module: /absolute/path/to/AgentCore/integration/librechat-governance/approval-hook.cjs
+    checkpointer:
+      type: memory
+      ttl: 3600
+
+# For a retained deployment use LibreChat's Mongo checkpointer. Memory is
+# intentionally selected here so this POC has no database dependency.

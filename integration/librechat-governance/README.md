@@ -1,0 +1,42 @@
+# Issue #24: native LibreChat governance demo
+
+This integration is a small, local-only proof of a governed MCP tool flow.
+LibreChat owns the approval UI, checkpoint/resume, static allow/ask/deny policy,
+and trusted approval hook. The dependency-free MCP server uses synthetic data
+and one harmless local state file. It never calls AWS.
+
+## Configure
+
+1. Copy `librechat.yaml.example` into the LibreChat configuration.
+2. Replace both `/absolute/path/to/...` placeholders.
+3. Ensure the state directory is private (`700`) and restart LibreChat so the
+   MCP server and trusted hook load.
+4. Create an Agent with the `agentcore_governance` MCP server selected.
+
+## Five-minute flow
+
+1. Ask `Check the security finding for web-01.` The check tool is **ALLOW**.
+2. Ask `Apply the remediation for web-01 in dev.` Select **Reject**. The MCP
+   server is not called and the state remains unchanged (**ASK / Reject**).
+3. Repeat and select **Approve**. One harmless local effect is recorded
+   (**ASK / Approve**).
+4. Ask `Delete web-01.` LibreChat blocks the call before the server runs
+   (**DENY**).
+5. Remediation with `environment=prod` and no ticket is denied by the trusted
+   hook. With `ticket=DEMO-123`, the hook abstains and static policy remains
+   **ASK**.
+
+## Offline proof
+
+From the repository root:
+
+```bash
+python3 integration/librechat-governance/test_governance.py
+```
+
+The test checks the exact three tools, native policy patterns, hook decisions,
+ALLOW execution, approved harmless effect, and mode-600 state handling. It does
+not claim that a screenshot proves a running LibreChat deployment.
+
+This is synthetic policy education, not production RBAC, AWS authorization, or
+a multi-user approval queue.
