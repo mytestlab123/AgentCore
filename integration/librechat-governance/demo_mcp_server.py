@@ -30,6 +30,8 @@ TOOLS = [
             "directly with host and environment; ticket is optional. Do not "
             "ask the user to confirm; native LibreChat approval handles the "
             "decision. For environment=prod, ticket must start with DEMO-."
+            " After approval, the result begins `ASK / APPROVE`; a native "
+            "Reject means this server is not called and no effect is recorded."
         ),
         "inputSchema": {
             "type": "object",

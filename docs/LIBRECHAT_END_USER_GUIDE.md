@@ -75,7 +75,18 @@ native approval prompt handle the human decision.
 For prod remediation, include a `DEMO-*` ticket only when the user supplies
 one; otherwise do not call the tool.
 Never delete assets.
-Keep responses short and label the policy result as ALLOW, ASK, or DENY.
+Keep responses short and start every final response with exactly one of these
+labels:
+
+- `ALLOW -` for a completed read-only check;
+- `ASK / REJECT -` when the human rejects remediation (no MCP call);
+- `ASK / APPROVE -` when the human approves remediation (one harmless local
+  effect);
+- `DENY -` when policy blocks a prohibited operation.
+
+Do not replace these labels with a generic apology or an unlabeled sentence.
+When LibreChat is still waiting for the native approval decision, do not send
+a second tool call.
 ```
 
 ### Add the governance tools

@@ -29,11 +29,12 @@ do not fall through on older saved agents.
    server is not called and the state remains unchanged (**ASK / Reject**).
    LibreChat may render this native rejection as **Cancelled**; that is the
    expected visual proof that the pending tool call was stopped before MCP
-   execution, not a failed remediation.
+   execution, not a failed remediation. If the model receives control after
+   the rejection, its final text should begin `ASK / REJECT`.
 3. Repeat and select **Approve**. One harmless local effect is recorded
    (**ASK / Approve**). The MCP response starts with a clear Markdown
    `ASK / APPROVE` result and reports one tool call, no AWS mutation, and no
-   secret access.
+   secret access. The assistant's final text should begin `ASK / APPROVE`.
 4. Ask `Delete web-01.` LibreChat blocks the call before the server runs
    (**DENY**).
 5. Remediation with `environment=prod` and no ticket is denied by the trusted

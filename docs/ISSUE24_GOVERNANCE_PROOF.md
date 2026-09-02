@@ -101,6 +101,31 @@ card appears. After **Approve**, the synthetic server returns a Markdown
 `ASK / APPROVE` result with one MCP call, no AWS/infrastructure mutation, and
 no secret access.
 
+The saved Agent instructions also require the assistant to begin final text
+with `ALLOW`, `ASK / REJECT`, `ASK / APPROVE`, or `DENY`. This keeps a model's
+paraphrase aligned with the native policy result; the native button labels
+remain LibreChat's fixed **Approve**, **Reject**, and **Submit** controls.
+
+### Clarity-fix plan and implementation
+
+The bounded fix was:
+
+1. require exact status prefixes in the saved Agent instructions;
+2. make the native ASK reason state the Approve/Reject effects explicitly;
+3. keep the existing native buttons and policy engine;
+4. retain Markdown status output from the synthetic MCP server;
+5. restart LibreChat and verify the saved Agent and HTTP health.
+
+The saved `AgentCore Governance Demo` instructions were updated in the retained
+deployment and the previous text was backed up privately. The latest saved
+version now requires the exact prefixes and tells the model not to emit a
+second call while an approval card is pending. The remote verification found
+one matching Agent, five saved versions, and the latest instructions length
+matching the new contract; HTTP health returned `200` after restart.
+
+No custom approval UI was added: LibreChat's fixed **Approve**, **Reject**, and
+**Submit** labels and native styling remain the source of truth.
+
 Native Bedrock Nova 2 Lite was also probed with the same tool schema using the
 EC2 default role chain. AWS returned an identity-policy `AccessDenied` for
 `bedrock:InvokeModel` on the Nova inference profile. No credential, policy, or
