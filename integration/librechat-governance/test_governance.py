@@ -24,6 +24,7 @@ class GovernanceContractTests(unittest.TestCase):
         for value in (
             "toolApproval:",
             "enabled: true",
+            "disableBuilder: false",
             "mcp:agentcore_governance:check_security_finding",
             "mcp:agentcore_governance:apply_demo_remediation",
             "mcp:agentcore_governance:delete_demo_asset",

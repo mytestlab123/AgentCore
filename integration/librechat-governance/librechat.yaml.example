@@ -13,7 +13,7 @@ mcpServers:
 
 endpoints:
   agents:
-    disableBuilder: true
+    disableBuilder: false
     capabilities:
       - tools
       - ask_user_question
