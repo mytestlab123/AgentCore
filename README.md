@@ -68,11 +68,27 @@ AWS_PROFILE=amit AWS_REGION=ap-southeast-1 \
   ./dev-issue9.sh --approve-live
 ```
 
-Open `http://127.0.0.1:5174/` and use **Generate key and run proof**. The full
-secret remains server-side in a mode-600 ignored file; the browser receives
-only a SHA-256 fingerprint. CloudTrail propagation is asynchronous and does
+Open `http://127.0.0.1:3333/` and use **Generate key and run proof**. The full
+secret remains in a mode-600 ignored file. Issue #12 adds an explicit
+loopback-only reveal/copy action that holds the secret in page memory for 15
+seconds and then masks it. CloudTrail propagation is asynchronous and does
 not block the core HTTP 200/403/lifecycle proof. See the
 [Issue #9 proof and developer guide](docs/ISSUE_9_BEDROCK_API_KEYS.md).
+
+For the Codex handoff, run `./scripts/codex-bedrock-smoke.sh --check`, then
+`./scripts/codex-bedrock-smoke.sh` and paste the copied key at its hidden
+prompt. The retained policy model is `openai.gpt-5.6-terra` with low reasoning;
+the current AWS account still returns model-unavailable. Set
+`CODEX_BEDROCK_MODEL` to another explicitly verified cheap OpenAI Bedrock model
+when needed; there is no automatic fallback. See
+[the Issue #12 operator guide](docs/CODEX_BEDROCK_KEY_DEMO.md).
+
+The Issue #12 GUI links directly to the real GitHub issue and includes
+**Create Codex AI key**. Clicking it is an explicit AWS mutation: it creates a
+separate model-scoped IAM user and 30-day Bedrock service-specific credential
+with `TTL=01-10-26` and `cleanup=review`. At-rest IAM/key cost is zero; model
+invocations remain usage-billed. The GUI refuses to guess or fall back when the
+entered OpenAI model is unavailable in the approved Codex Region, `us-east-2`.
 
 Explicit cleanup is separate and is not part of the repeat-demo path:
 
@@ -84,7 +100,7 @@ AWS_PROFILE=amit AWS_REGION=ap-southeast-1 \
 With the local portal running, use its exact URL:
 
 ```bash
-APP_URL=http://127.0.0.1:5174/ \
+APP_URL=http://127.0.0.1:3333/ \
   EXPECTED_API_BASE_URL=http://127.0.0.1:9019 \
   ./scripts/browser-e2e.sh
 ```
@@ -126,14 +142,14 @@ The script writes only the API URL to untracked `frontend/.env.local`. Restart
 the portal in live mode:
 
 ```bash
-AGENTCORE_PORT=5174 ./dev-live.sh
+AGENTCORE_PORT=3333 ./dev-live.sh
 ```
 
 Then run the same browser proof while allowing only the exact deployed API:
 
 ```bash
 EXPECTED_API_BASE_URL="$(sed -n 's/^VITE_API_BASE_URL=//p' frontend/.env.local)" \
-  APP_URL=http://localhost:5174/ ./scripts/browser-e2e.sh
+  APP_URL=http://localhost:3333/ ./scripts/browser-e2e.sh
 ```
 
 The live API contract also has a secret-safe runner. `--full` requires Bedrock

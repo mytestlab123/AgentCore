@@ -64,6 +64,128 @@ async function request(path: string, init?: RequestInit): Promise<Issue9ProofSta
   return body;
 }
 
+export interface RevealedKey {
+  key: string;
+  expiresInSeconds: number;
+}
+
+export interface CodexKeyStatus {
+  state: 'READY' | 'RUNNING' | 'CREATED' | 'FAIL';
+  model: string;
+  masked: string | null;
+  message: string;
+}
+
+export interface NovaKeyStatus {
+  available: boolean;
+  masked: string | null;
+  model: string;
+}
+
+export interface NovaKeysStatus {
+  keys: Record<'nova2' | 'nova_pro', NovaKeyStatus>;
+  expiresInSeconds: number;
+}
+
+export interface AwsPlaygroundResult {
+  decision: 'ALLOW' | 'DENY';
+  tool: 'ec2' | 'inspector' | 'ssm' | 'text';
+  model: string;
+  records: Record<string, string>[];
+  answer: string;
+  inputTokens: number;
+  outputTokens: number;
+  stopReason: string;
+}
+
+export interface CompareLaneResult {
+  provider: 'Amazon Bedrock' | 'GovTech PlatformAI';
+  model: string;
+  status: 'ALLOW' | 'DENIED' | 'NOT AVAILABLE' | 'NOT CONFIGURED' | 'ERROR';
+  answer: string;
+  latencyMs: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  completion: string;
+}
+
+export interface CompareResult {
+  results: CompareLaneResult[];
+}
+
+async function liveRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  if (!issue9ApiBaseUrl) throw new Error('Live AWS backend URL is not configured.');
+  const response = await fetch(`${issue9ApiBaseUrl}${path}`, init);
+  const body = await response.json() as T & { message?: string };
+  if (!response.ok) throw new Error(body.message || `Live AWS action failed with HTTP ${response.status}`);
+  return body;
+}
+
+export function getNovaKeys(): Promise<NovaKeysStatus> {
+  return liveRequest('/nova-keys');
+}
+
+export function revealNovaKey(name: 'nova2' | 'nova_pro'): Promise<RevealedKey> {
+  return liveRequest(`/nova-keys/${name}/reveal`, { method: 'POST', cache: 'no-store' });
+}
+
+export function runAwsPlayground(model: 'nova2' | 'nova_pro', tool: 'ec2' | 'inspector' | 'ssm', prompt: string): Promise<AwsPlaygroundResult> {
+  return liveRequest('/aws-playground', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ model, tool, prompt }),
+  });
+}
+
+export function runPlatformTool(model: 'gpt-5.6-luna' | 'azure.claude-haiku-4-5' | 'gemini-3.5-flash', tool: 'ec2' | 'inspector' | 'ssm', prompt: string): Promise<AwsPlaygroundResult> {
+  return liveRequest('/platform-tool', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ model, tool, prompt }),
+  });
+}
+
+export function compareModels(prompt: string): Promise<CompareResult> {
+  return liveRequest('/compare', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ prompt }),
+  });
+}
+
+async function codexKeyRequest(path: string, init?: RequestInit): Promise<CodexKeyStatus> {
+  if (!issue9ApiBaseUrl) throw new Error('Issue #12 backend URL is not configured.');
+  const response = await fetch(`${issue9ApiBaseUrl}${path}`, init);
+  const body = await response.json() as CodexKeyStatus & { message: string };
+  if (!response.ok) throw new Error(body.message || `Codex key action failed with HTTP ${response.status}`);
+  return body;
+}
+
+export function getCodexKey(): Promise<CodexKeyStatus> {
+  return codexKeyRequest('/codex-key');
+}
+
+export function createCodexKey(model: string): Promise<CodexKeyStatus> {
+  return codexKeyRequest('/codex-key', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ model }),
+  });
+}
+
+export async function revealCodexKey(): Promise<RevealedKey> {
+  if (!issue9ApiBaseUrl) throw new Error('Issue #12 backend URL is not configured.');
+  const response = await fetch(`${issue9ApiBaseUrl}/codex-key/reveal`, { method: 'POST', cache: 'no-store' });
+  const body = await response.json() as RevealedKey & { message?: string };
+  if (!response.ok) throw new Error(body.message || `Codex key reveal failed with HTTP ${response.status}`);
+  return body;
+}
+
+export async function revealIssue9Key(): Promise<RevealedKey> {
+  if (!issue9ApiBaseUrl) throw new Error('Issue #9 backend URL is not configured.');
+  const response = await fetch(`${issue9ApiBaseUrl}/key/reveal`, { method: 'POST', cache: 'no-store' });
+  const body = await response.json() as RevealedKey & { message?: string };
+  if (!response.ok) throw new Error(body.message || `Key reveal failed with HTTP ${response.status}`);
+  return body;
+}
+
 export function getIssue9Proof(): Promise<Issue9ProofStatus> {
   return request('/proof');
 }

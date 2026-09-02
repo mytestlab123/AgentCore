@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 
+import csv
 import hashlib
 import json
 import os
 import signal
 import subprocess
 import threading
+import time
+import urllib.error
+import urllib.request
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -14,9 +18,70 @@ from urllib.parse import urlparse
 
 REPO_DIR = Path(__file__).resolve().parents[1]
 PROOF_SCRIPT = REPO_DIR / "scripts" / "bedrock-api-key-poc.sh"
+CODEX_KEY_SCRIPT = REPO_DIR / "scripts" / "create-codex-bedrock-key.sh"
 DEFAULT_EVIDENCE_ROOT = Path.home() / ".AGENTS-temp" / "AgentCore" / "issue9-gui"
+DEFAULT_RETAINED_CREDENTIAL = Path.home() / ".AGENTS-temp" / "AgentCore" / "issue9-retained" / "credential.json"
+DEFAULT_CODEX_RETAINED_DIR = Path.home() / ".AGENTS-temp" / "AgentCore" / "issue12-codex-key"
+DEFAULT_KEY_ENV = Path("/home/user/git/awsops/.env")
+DEFAULT_GTX_CONFIG = Path.home() / ".config" / "gtx" / "config.env"
+INSPECTOR_SAMPLE = REPO_DIR / "docs" / "demo-data" / "seccop-inspector-sanitized.csv"
+LIVE_DEMO_ROLE = "agentcore-live-demo-readonly-role-r1"
 ALLOWED_MODEL = "apac.amazon.nova-lite-v1:0"
 RESTRICTED_MODEL = "apac.amazon.nova-pro-v1:0"
+NOVA_MODELS = {
+    "nova2": "global.amazon.nova-2-lite-v1:0",
+    "nova_pro": "apac.amazon.nova-pro-v1:0",
+}
+PLATFORM_MODEL = "gpt-5.6-luna"
+PLATFORM_CLAUDE_MODEL = "azure.claude-haiku-4-5"
+PLATFORM_GEMINI_MODEL = "gemini-3.5-flash"
+PLATFORM_BASE_URL = "https://api-public.ai.tech.gov.sg"
+
+
+def _read_env_value(path, name):
+    try:
+        if path.stat().st_mode & 0o077:
+            raise RuntimeError("The retained key file must have mode 600.")
+        for raw_line in path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if line.startswith("export "):
+                line = line[7:]
+            if line.startswith(f"{name}="):
+                value = line.split("=", 1)[1].strip().strip("'\"")
+                if value:
+                    return value
+    except OSError as error:
+        raise RuntimeError("The retained Nova key file is unavailable.") from error
+    raise RuntimeError(f"The retained {name} key is unavailable.")
+
+
+def _masked_key(value):
+    return f"bedrock-{hashlib.sha256(value.encode('utf-8')).hexdigest()[:12]}********" if value else None
+
+
+def _read_platform_config(path):
+    try:
+        if path.stat().st_mode & 0o077:
+            raise RuntimeError("NOT CONFIGURED: PlatformAI configuration must have mode 600.")
+        values = {}
+        allowed = {"PLATFORM_API_KEY", "PLATFORM_API_BASE_URL", "PLATFORM_AI_MODEL", "PLATFORM_AI_REASONING_EFFORT"}
+        for raw_line in path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("export "):
+                line = line[7:]
+            name, separator, value = line.partition("=")
+            if not separator or name.strip() not in allowed:
+                raise RuntimeError("NOT CONFIGURED: PlatformAI configuration contains an unsupported setting.")
+            values[name.strip()] = value.strip().strip("'\"")
+    except OSError as error:
+        raise RuntimeError("NOT CONFIGURED: PlatformAI is not configured.") from error
+    if values.get("PLATFORM_API_BASE_URL", "").rstrip("/") != PLATFORM_BASE_URL:
+        raise RuntimeError("NOT CONFIGURED: PlatformAI External endpoint is not configured.")
+    if values.get("PLATFORM_AI_MODEL") != PLATFORM_MODEL or not values.get("PLATFORM_API_KEY"):
+        raise RuntimeError("NOT CONFIGURED: PlatformAI GPT-5.6 Luna is not configured.")
+    return values
 
 
 def _read_json(path):
@@ -155,8 +220,9 @@ def build_public_status(evidence_dir, process_running=False, return_code=None):
 
 
 class ProofController:
-    def __init__(self, evidence_root=DEFAULT_EVIDENCE_ROOT):
+    def __init__(self, evidence_root=DEFAULT_EVIDENCE_ROOT, retained_credential=DEFAULT_RETAINED_CREDENTIAL):
         self.evidence_root = Path(evidence_root)
+        self.retained_credential = Path(retained_credential)
         self.lock = threading.Lock()
         self.process = None
         self.evidence_dir = None
@@ -170,6 +236,23 @@ class ProofController:
                     self.evidence_dir = candidate
                     self.return_code = 0
                     break
+
+    def reveal_key(self):
+        try:
+            mode = self.retained_credential.stat().st_mode & 0o777
+        except OSError as error:
+            raise RuntimeError("The retained demo key is not available.") from error
+        if mode != 0o600:
+            raise RuntimeError("The retained demo key must have mode 600.")
+        credential = _read_json(self.retained_credential)
+        if not credential:
+            raise RuntimeError("The retained demo key is unreadable.")
+        value = credential.get("ServiceSpecificCredential", {}).get("ServiceApiKeyValue")
+        if not value:
+            value = credential.get("ServiceSpecificCredential", {}).get("ServiceCredentialSecret")
+        if not value:
+            raise RuntimeError("The retained demo key has an unsupported format.")
+        return {"key": value, "expiresInSeconds": 15}
 
     def start(self):
         with self.lock:
@@ -267,15 +350,356 @@ class ProofController:
             process.wait(timeout=15)
 
 
+class CodexKeyController:
+    def __init__(self, retained_dir=DEFAULT_CODEX_RETAINED_DIR):
+        self.retained_dir = Path(retained_dir)
+        self.credential_file = self.retained_dir / "credential.json"
+        self.metadata_file = self.retained_dir / "metadata.json"
+        self.lock = threading.Lock()
+        self.process = None
+        self.running = False
+        self.return_code = None
+
+    def status(self):
+        metadata = _read_json(self.metadata_file)
+        with self.lock:
+            running = self.running
+            return_code = self.return_code
+        if metadata and self.credential_file.is_file():
+            return {
+                "state": "CREATED", "model": metadata.get("model", ""),
+                "masked": f"bedrock-{metadata.get('keyFingerprint', '')}********",
+                "message": "Dedicated 30-day Codex key retained with cleanup=review.",
+            }
+        if running:
+            return {"state": "RUNNING", "model": "", "masked": None, "message": "Creating dedicated AWS credential..."}
+        if return_code not in (None, 0):
+            return {"state": "FAIL", "model": "", "masked": None, "message": "Creation failed. Inspect protected local evidence."}
+        return {"state": "READY", "model": "", "masked": None, "message": "Ready to create one dedicated Codex key."}
+
+    def start(self, model):
+        if not isinstance(model, str) or not model.startswith("openai.") or not all(
+            character.isalnum() or character in ".-_" for character in model
+        ):
+            raise RuntimeError("Use an exact openai.* Bedrock model ID.")
+        with self.lock:
+            if self.running:
+                raise RuntimeError("Codex key creation is already running.")
+            if self.credential_file.exists():
+                raise RuntimeError("A retained Codex key already exists.")
+            self.running = True
+            self.return_code = None
+            threading.Thread(target=self._run, args=(model,), daemon=True).start()
+        return self.status()
+
+    def _run(self, model):
+        env = os.environ.copy()
+        env["ISSUE12_CODEX_MODEL"] = model
+        evidence_dir = Path.home() / ".AGENTS-temp" / "AgentCore" / "issue12-codex-key-gui" / datetime.now().astimezone().strftime("%Y%m%dT%H%M%S%z")
+        evidence_dir.mkdir(parents=True, mode=0o700, exist_ok=False)
+        with (evidence_dir / "runner.stdout").open("w", encoding="utf-8") as stdout, (evidence_dir / "runner.stderr").open("w", encoding="utf-8") as stderr:
+            process = subprocess.Popen(
+                ["/usr/bin/bash", str(CODEX_KEY_SCRIPT), "--approve-run"],
+                cwd=REPO_DIR, env=env, stdout=stdout, stderr=stderr,
+                start_new_session=True, text=True,
+            )
+            with self.lock:
+                self.process = process
+            return_code = process.wait()
+        with self.lock:
+            self.return_code = return_code
+            self.running = False
+
+    def reveal_key(self):
+        controller = ProofController(retained_credential=self.credential_file)
+        return controller.reveal_key()
+
+    def stop(self):
+        with self.lock:
+            process = self.process
+        if process and process.poll() is None:
+            try:
+                os.killpg(process.pid, signal.SIGINT)
+                process.wait(timeout=30)
+            except (ProcessLookupError, subprocess.TimeoutExpired):
+                return
+
+
+class LiveAwsPlayground:
+    def __init__(self, key_env=DEFAULT_KEY_ENV, profile="amit", region="ap-southeast-1", platform_config=DEFAULT_GTX_CONFIG):
+        self.key_env = Path(key_env)
+        self.profile = profile
+        self.region = region
+        self.platform_config = Path(platform_config)
+        self.platform_authorized_models = None
+
+    def key_status(self):
+        keys = {}
+        for name, model in NOVA_MODELS.items():
+            try:
+                value = _read_env_value(self.key_env, name)
+                keys[name] = {"available": True, "masked": _masked_key(value), "model": model}
+            except RuntimeError:
+                keys[name] = {"available": False, "masked": None, "model": model}
+        return {"keys": keys, "expiresInSeconds": 15}
+
+    def reveal_key(self, name):
+        if name not in NOVA_MODELS:
+            raise RuntimeError("Unknown Nova key.")
+        return {"key": _read_env_value(self.key_env, name), "expiresInSeconds": 15}
+
+    def _aws(self, arguments, env=None):
+        command = ["aws", *arguments, "--region", self.region, "--output", "json", "--no-cli-pager"]
+        completed = subprocess.run(
+            command, env=env, capture_output=True, text=True, timeout=30, check=False
+        )
+        if completed.returncode:
+            raise RuntimeError("AWS operation failed.")
+        return json.loads(completed.stdout or "{}")
+
+    def _role_env(self):
+        identity = self._aws(["sts", "get-caller-identity", "--profile", self.profile])
+        role_arn = f"arn:aws:iam::{identity['Account']}:role/{LIVE_DEMO_ROLE}"
+        assumed = self._aws([
+            "sts", "assume-role", "--profile", self.profile, "--role-arn", role_arn,
+            "--role-session-name", "AgentCoreLiveDemo",
+        ])
+        credentials = assumed["Credentials"]
+        env = os.environ.copy()
+        env.pop("AWS_PROFILE", None)
+        env.update({
+            "AWS_ACCESS_KEY_ID": credentials["AccessKeyId"],
+            "AWS_SECRET_ACCESS_KEY": credentials["SecretAccessKey"],
+            "AWS_SESSION_TOKEN": credentials["SessionToken"],
+            "AWS_REGION": self.region,
+        })
+        return env
+
+    def _source(self, tool, env):
+        if tool == "ec2":
+            payload = self._aws(["ec2", "describe-instances"], env)
+            records = []
+            for reservation in payload.get("Reservations", []):
+                for instance in reservation.get("Instances", []):
+                    tags = {tag.get("Key"): tag.get("Value") for tag in instance.get("Tags", [])}
+                    records.append({
+                        "instanceAlias": tags.get("Name", "unnamed"),
+                        "state": instance.get("State", {}).get("Name", "unknown"),
+                        "instanceType": instance.get("InstanceType", "unknown"),
+                        "platform": instance.get("PlatformDetails", "unknown"),
+                    })
+            return records[:20]
+        if tool == "inspector":
+            try:
+                with INSPECTOR_SAMPLE.open(encoding="utf-8", newline="") as sample:
+                    records = list(csv.DictReader(sample))
+            except OSError as error:
+                raise RuntimeError("Inspector demo sample is unavailable.") from error
+            if len(records) != 50:
+                raise RuntimeError("Inspector demo sample must contain exactly 50 findings.")
+            return records
+        if tool == "ssm":
+            completed = subprocess.run(
+                ["aws", "ssm", "describe-parameters", "--max-results", "1", "--region", self.region,
+                 "--output", "json", "--no-cli-pager"],
+                env=env, capture_output=True, text=True, timeout=30, check=False,
+            )
+            if completed.returncode == 0:
+                raise RuntimeError("Safety failure: SSM Parameter Store was not denied.")
+            if "AccessDenied" not in completed.stderr:
+                raise RuntimeError("SSM deny proof did not return AccessDenied.")
+            return []
+        raise RuntimeError("Unknown AWS tool.")
+
+    def _evidence_text(self, tool, records):
+        if tool == "inspector":
+            try:
+                return INSPECTOR_SAMPLE.read_text(encoding="utf-8")
+            except OSError as error:
+                raise RuntimeError("Inspector demo sample is unavailable.") from error
+        return json.dumps(records)
+
+    def _invoke(self, key_name, prompt):
+        key = _read_env_value(self.key_env, key_name)
+        model = NOVA_MODELS[key_name]
+        body = json.dumps({
+            "system": [{"text": "You are an AWS operations report assistant. Answer only from the supplied sanitized AWS records. Do not claim shell, CLI, tool, account, or environment access. If the question is unrelated to the selected records, say so briefly. Return concise GitHub-flavored Markdown."}],
+            "messages": [{"role": "user", "content": [{"text": prompt}]}],
+            "inferenceConfig": {"maxTokens": 900, "temperature": 0.1},
+        })
+        completed = subprocess.run([
+            "curl", "--silent", "--show-error", "--fail-with-body", "--max-time", "60",
+            "-H", f"Authorization: Bearer {key}", "-H", "content-type: application/json",
+            "-d", body,
+            f"https://bedrock-runtime.{self.region}.amazonaws.com/model/{model}/converse",
+        ], capture_output=True, text=True, timeout=70, check=False)
+        if completed.returncode:
+            raise RuntimeError("Bedrock model invocation failed.")
+        response = json.loads(completed.stdout)
+        text = response["output"]["message"]["content"][0]["text"]
+        usage = response.get("usage", {})
+        return text, usage, response.get("stopReason", "unknown")
+
+    def _platform_request(self, path, key, payload=None):
+        data = json.dumps(payload).encode("utf-8") if payload is not None else None
+        request = urllib.request.Request(
+            f"{PLATFORM_BASE_URL}/platform/models/v1/{path}", data=data,
+            headers={"x-api-key": key, "content-type": "application/json", "accept": "application/json"},
+            method="POST" if payload is not None else "GET",
+        )
+        attempts = 2 if path == "models" else 1
+        for attempt in range(attempts):
+            try:
+                with urllib.request.urlopen(request, timeout=60) as response:
+                    return json.loads(response.read())
+            except urllib.error.HTTPError as error:
+                if error.code in {401, 403}:
+                    raise RuntimeError("DENIED: PlatformAI rejected the request.") from error
+                if error.code == 404:
+                    raise RuntimeError("NOT AVAILABLE: PlatformAI model is unavailable.") from error
+                if error.code in {429, 502, 503, 504} and attempt + 1 < attempts:
+                    continue
+                raise RuntimeError("ERROR: PlatformAI request failed.") from error
+            except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
+                if attempt + 1 < attempts:
+                    continue
+                raise RuntimeError("ERROR: PlatformAI request failed.") from error
+        raise RuntimeError("ERROR: PlatformAI request failed.")
+
+    def _invoke_platform(self, prompt, model=PLATFORM_MODEL):
+        config = _read_platform_config(self.platform_config)
+        key = config["PLATFORM_API_KEY"]
+        if self.platform_authorized_models is None:
+            catalog = self._platform_request("models", key)
+            self.platform_authorized_models = {item.get("id") for item in catalog.get("data", [])}
+        if model not in self.platform_authorized_models:
+            raise RuntimeError(f"NOT AVAILABLE: PlatformAI model {model} is unavailable.")
+        last_answer = ""
+        last_usage = {}
+        last_status = "unknown"
+        retry_models = {PLATFORM_MODEL, PLATFORM_GEMINI_MODEL}
+        attempts = 2 if model in retry_models else 1
+        for attempt in range(attempts):
+            concise_prefix = "Keep the complete answer below 180 words. " if attempt else ""
+            payload = {
+                "model": model,
+                "input": concise_prefix + prompt,
+                "max_output_tokens": 6000 if attempt else (3000 if model in retry_models else 700),
+            }
+            if model == PLATFORM_MODEL:
+                payload["reasoning"] = {"effort": "low"}
+            response = self._platform_request("responses", key, payload)
+            last_answer = "".join(
+                content.get("text", "")
+                for item in response.get("output", [])
+                for content in item.get("content", [])
+                if content.get("type") == "output_text"
+            )
+            last_usage = response.get("usage", {})
+            last_status = response.get("status", "unknown")
+            if last_status == "completed" and last_answer:
+                return last_answer, last_usage, last_status
+        if last_answer:
+            return last_answer, last_usage, last_status
+        raise RuntimeError("ERROR: PlatformAI returned no response text.")
+
+    def platform_tool(self, body):
+        prompt = str(body.get("prompt", "")).strip()
+        model = body.get("model")
+        tool = body.get("tool")
+        if model not in {PLATFORM_MODEL, PLATFORM_CLAUDE_MODEL, PLATFORM_GEMINI_MODEL} or tool not in {"ec2", "inspector", "ssm"}:
+            raise RuntimeError("Use one approved PlatformAI model and AWS tool.")
+        if not prompt or len(prompt) > 500:
+            raise RuntimeError("Use a prompt of 1 to 500 characters.")
+        records = self._source(tool, {} if tool == "inspector" else self._role_env())
+        if tool == "ssm":
+            return {"decision": "DENY", "tool": tool, "model": model, "records": [],
+                    "answer": "AWS IAM explicitly denied SSM Parameter Store. No parameter names or values were returned.",
+                    "inputTokens": 0, "outputTokens": 0, "stopReason": "policy_denied", "latencyMs": 0}
+        external_records = records
+        if tool == "ec2":
+            external_records = [{**{key: value for key, value in record.items() if key != "instanceAlias"},
+                                 "instanceAlias": f"instance-{index}"}
+                                for index, record in enumerate(records, start=1)]
+        started = time.monotonic()
+        answer, usage, completion = self._invoke_platform(
+            "Return concise GitHub-flavored Markdown. Use only the supplied evidence records. "
+            "Do not claim tool or account access.\n\n" + prompt + "\n\nEvidence records:\n" + self._evidence_text(tool, external_records),
+            model,
+        )
+        return {"decision": "ALLOW", "tool": tool, "model": model,
+                "records": external_records, "answer": answer,
+                "inputTokens": usage.get("input_tokens", 0), "outputTokens": usage.get("output_tokens", 0),
+                "stopReason": completion, "latencyMs": round((time.monotonic() - started) * 1000)}
+
+    def compare(self, body):
+        prompt = str(body.get("prompt", "")).strip()
+        if not prompt or len(prompt) > 500:
+            raise RuntimeError("Use one public-safe prompt of 1 to 500 characters.")
+        system = "Return concise GitHub-flavored Markdown. Do not claim tool or account access.\n\n"
+        results = []
+        started = time.monotonic()
+        try:
+            answer, usage, completion = self._invoke("nova2", system + prompt)
+            results.append({"provider": "Amazon Bedrock", "model": NOVA_MODELS["nova2"], "status": "ALLOW",
+                            "answer": answer, "latencyMs": round((time.monotonic() - started) * 1000),
+                            "inputTokens": usage.get("inputTokens"), "outputTokens": usage.get("outputTokens"),
+                            "completion": completion})
+        except RuntimeError:
+            results.append({"provider": "Amazon Bedrock", "model": NOVA_MODELS["nova2"], "status": "ERROR",
+                            "answer": "Amazon Bedrock request failed.", "latencyMs": round((time.monotonic() - started) * 1000),
+                            "inputTokens": None, "outputTokens": None, "completion": "error"})
+        started = time.monotonic()
+        try:
+            answer, usage, completion = self._invoke_platform(system + prompt)
+            results.append({"provider": "GovTech PlatformAI", "model": PLATFORM_MODEL, "status": "ALLOW",
+                            "answer": answer, "latencyMs": round((time.monotonic() - started) * 1000),
+                            "inputTokens": usage.get("input_tokens"), "outputTokens": usage.get("output_tokens"),
+                            "completion": completion})
+        except RuntimeError as error:
+            message = str(error)
+            status = message.split(":", 1)[0] if ":" in message else "ERROR"
+            if status not in {"DENIED", "NOT AVAILABLE", "NOT CONFIGURED", "ERROR"}:
+                status = "ERROR"
+            results.append({"provider": "GovTech PlatformAI", "model": PLATFORM_MODEL, "status": status,
+                            "answer": message.split(":", 1)[-1].strip(),
+                            "latencyMs": round((time.monotonic() - started) * 1000),
+                            "inputTokens": None, "outputTokens": None, "completion": "error"})
+        return {"results": results}
+
+    def run(self, body):
+        key_name = body.get("model")
+        tool = body.get("tool")
+        question = str(body.get("prompt", "")).strip()[:500]
+        if key_name not in NOVA_MODELS or tool not in {"ec2", "inspector", "ssm"}:
+            raise RuntimeError("Choose one supported model and AWS tool.")
+        records = self._source(tool, {} if tool == "inspector" else self._role_env())
+        if tool == "ssm":
+            return {"decision": "DENY", "tool": tool, "model": NOVA_MODELS[key_name],
+                    "records": [], "answer": "AWS IAM explicitly denied SSM Parameter Store. No parameter names or values were returned.",
+                    "inputTokens": 0, "outputTokens": 0, "stopReason": "policy_denied"}
+        default_question = "Summarize the most important operational facts in three concise bullets."
+        prompt = (question or default_question) + "\nUse only these evidence records:\n" + self._evidence_text(tool, records)
+        answer, usage, stop_reason = self._invoke(key_name, prompt)
+        return {"decision": "ALLOW", "tool": tool, "model": NOVA_MODELS[key_name],
+                "records": records, "answer": answer,
+                "inputTokens": usage.get("inputTokens", 0), "outputTokens": usage.get("outputTokens", 0),
+                "stopReason": stop_reason}
+
+
 class Issue9Handler(BaseHTTPRequestHandler):
     controller = None
+    codex_controller = None
+    live_playground = None
     allowed_origins = {
         "http://localhost:5173",
         "http://localhost:5174",
         "http://localhost:5175",
+        "http://localhost:3333",
         "http://127.0.0.1:5173",
         "http://127.0.0.1:5174",
         "http://127.0.0.1:5175",
+        "http://127.0.0.1:3333",
     }
 
     def _send_json(self, status, body):
@@ -301,7 +725,7 @@ class Issue9Handler(BaseHTTPRequestHandler):
         if path == "/health":
             self._send_json(200, {
                 "status": "ok",
-                "mode": "ISSUE9_NATIVE_BEDROCK",
+                "mode": "ISSUE15_MODEL_COMPARE",
                 "profileAlias": "amit",
                 "region": "ap-southeast-1",
             })
@@ -309,13 +733,81 @@ class Issue9Handler(BaseHTTPRequestHandler):
         if path == "/proof":
             self._send_json(200, self.controller.status())
             return
+        if path == "/codex-key":
+            self._send_json(200, self.codex_controller.status())
+            return
+        if path == "/nova-keys":
+            self._send_json(200, self.live_playground.key_status())
+            return
         self._send_json(404, {"message": "Not found"})
 
     def do_POST(self):
         path = urlparse(self.path).path
         origin = self.headers.get("Origin", "")
-        if origin and origin not in self.allowed_origins:
+        if self.client_address[0] not in {"127.0.0.1", "::1"}:
+            self._send_json(403, {"message": "Loopback access required"})
+            return
+        if origin not in self.allowed_origins:
             self._send_json(403, {"message": "Origin not allowed"})
+            return
+        if path == "/key/reveal":
+            try:
+                self._send_json(200, self.controller.reveal_key())
+            except RuntimeError as error:
+                self._send_json(409, {"message": str(error)})
+            return
+        if path == "/codex-key/reveal":
+            try:
+                self._send_json(200, self.codex_controller.reveal_key())
+            except RuntimeError as error:
+                self._send_json(409, {"message": str(error)})
+            return
+        if path == "/codex-key":
+            try:
+                content_length = int(self.headers.get("content-length", "0"))
+                if content_length < 1 or content_length > 512:
+                    raise RuntimeError("Invalid Codex key request.")
+                body = json.loads(self.rfile.read(content_length))
+                self._send_json(202, self.codex_controller.start(body.get("model")))
+            except (RuntimeError, json.JSONDecodeError) as error:
+                self._send_json(409, {"message": str(error)})
+            return
+        if path.startswith("/nova-keys/") and path.endswith("/reveal"):
+            try:
+                name = path.split("/")[2]
+                self._send_json(200, self.live_playground.reveal_key(name))
+            except RuntimeError as error:
+                self._send_json(409, {"message": str(error)})
+            return
+        if path == "/aws-playground":
+            try:
+                content_length = int(self.headers.get("content-length", "0"))
+                if content_length < 1 or content_length > 2048:
+                    raise RuntimeError("Invalid playground request.")
+                body = json.loads(self.rfile.read(content_length))
+                self._send_json(200, self.live_playground.run(body))
+            except (RuntimeError, json.JSONDecodeError, KeyError, TypeError) as error:
+                self._send_json(409, {"message": str(error)})
+            return
+        if path == "/compare":
+            try:
+                content_length = int(self.headers.get("content-length", "0"))
+                if content_length < 1 or content_length > 1024:
+                    raise RuntimeError("Invalid compare request.")
+                body = json.loads(self.rfile.read(content_length))
+                self._send_json(200, self.live_playground.compare(body))
+            except (RuntimeError, json.JSONDecodeError, KeyError, TypeError) as error:
+                self._send_json(409, {"message": str(error)})
+            return
+        if path == "/platform-tool":
+            try:
+                content_length = int(self.headers.get("content-length", "0"))
+                if content_length < 1 or content_length > 1024:
+                    raise RuntimeError("Invalid PlatformAI tool request.")
+                body = json.loads(self.rfile.read(content_length))
+                self._send_json(200, self.live_playground.platform_tool(body))
+            except (RuntimeError, json.JSONDecodeError, KeyError, TypeError) as error:
+                self._send_json(409, {"message": str(error)})
             return
         if path != "/proof":
             self._send_json(404, {"message": "Not found"})
@@ -343,19 +835,23 @@ def main():
     port = int(os.environ.get("ISSUE9_API_PORT", "9019"))
     controller = ProofController()
     Issue9Handler.controller = controller
+    Issue9Handler.codex_controller = CodexKeyController()
+    Issue9Handler.live_playground = LiveAwsPlayground()
     server = ThreadingHTTPServer(("127.0.0.1", port), Issue9Handler)
 
     def stop_server(_signum, _frame):
         controller.stop()
+        Issue9Handler.codex_controller.stop()
         threading.Thread(target=server.shutdown, daemon=True).start()
 
     signal.signal(signal.SIGINT, stop_server)
     signal.signal(signal.SIGTERM, stop_server)
-    print(f"Issue #9 backend ready at http://127.0.0.1:{port}", flush=True)
+    print(f"Issue #15 backend ready at http://127.0.0.1:{port}", flush=True)
     try:
         server.serve_forever()
     finally:
         controller.stop()
+        Issue9Handler.codex_controller.stop()
         server.server_close()
 
 
