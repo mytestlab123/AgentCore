@@ -27,8 +27,13 @@ do not fall through on older saved agents.
 1. Ask `Check the security finding for web-01.` The check tool is **ALLOW**.
 2. Ask `Apply the remediation for web-01 in dev.` Select **Reject**. The MCP
    server is not called and the state remains unchanged (**ASK / Reject**).
+   LibreChat may render this native rejection as **Cancelled**; that is the
+   expected visual proof that the pending tool call was stopped before MCP
+   execution, not a failed remediation.
 3. Repeat and select **Approve**. One harmless local effect is recorded
-   (**ASK / Approve**).
+   (**ASK / Approve**). The MCP response starts with a clear Markdown
+   `ASK / APPROVE` result and reports one tool call, no AWS mutation, and no
+   secret access.
 4. Ask `Delete web-01.` LibreChat blocks the call before the server runs
    (**DENY**).
 5. Remediation with `environment=prod` and no ticket is denied by the trusted

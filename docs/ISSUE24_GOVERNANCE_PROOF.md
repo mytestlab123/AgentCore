@@ -91,6 +91,16 @@ fresh-chat GUI proof. Start a new conversation after a restart; the configured
 `memory` checkpointer is process-local, so an old paused conversation must not
 be reused as a live acceptance run.
 
+### Native UI interpretation
+
+After selecting **Reject** on an ASK card, LibreChat may show the pending tool
+call as **Cancelled**. For this synthetic demo that is the expected
+`ASK / Reject` proof: the MCP server is not called and the state file remains
+unchanged. It is distinct from `DENY`, which blocks the tool before an approval
+card appears. After **Approve**, the synthetic server returns a Markdown
+`ASK / APPROVE` result with one MCP call, no AWS/infrastructure mutation, and
+no secret access.
+
 Native Bedrock Nova 2 Lite was also probed with the same tool schema using the
 EC2 default role chain. AWS returned an identity-policy `AccessDenied` for
 `bedrock:InvokeModel` on the Nova inference profile. No credential, policy, or

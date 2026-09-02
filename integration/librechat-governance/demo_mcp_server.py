@@ -103,7 +103,15 @@ def call_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
     if name == "check_security_finding":
         state["finding_calls"] += 1
         save_state(state)
-        return text_result("web-01 | HIGH | demo-cve-2026-0001 | patch package demo-lib")
+        return text_result(
+            "## ALLOW - Security finding returned\n\n"
+            "- Host: `web-01`\n"
+            "- Severity: **HIGH**\n"
+            "- Finding: `demo-cve-2026-0001`\n"
+            "- Recommended action: patch package `demo-lib`\n"
+            "- MCP tool calls: **1**\n"
+            "- AWS or infrastructure mutation: **none**"
+        )
 
     if name == "apply_demo_remediation":
         environment = args.get("environment")
@@ -115,12 +123,24 @@ def call_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
         state["remediation_calls"] += 1
         state["remediated"] = True
         save_state(state)
-        return text_result(f"Applied one harmless demo effect to {host} ({environment}).")
+        return text_result(
+            "## ASK / APPROVE - Remediation completed\n\n"
+            f"- Host: `{host}`\n"
+            f"- Environment: `{environment}`\n"
+            "- Result: **one harmless local demo effect recorded**\n"
+            "- MCP tool calls: **1** (after approval)\n"
+            "- AWS or infrastructure mutation: **none**\n"
+            "- Secrets accessed: **none**"
+        )
 
     if name == "delete_demo_asset":
-        state["delete_calls"] += 1
-        save_state(state)
-        return text_result("Prohibited demo operation; no asset was deleted.", error=True)
+        return text_result(
+            "## DENY - Deletion blocked\n\n"
+            "- This operation is prohibited by the native LibreChat policy.\n"
+            "- MCP tool calls: **0 expected**\n"
+            "- Demo asset deleted: **no**",
+            error=True,
+        )
 
     return text_result(f"Unknown tool: {name}", error=True)
 

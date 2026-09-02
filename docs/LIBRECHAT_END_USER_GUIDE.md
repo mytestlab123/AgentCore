@@ -171,6 +171,10 @@ Expected behavior:
 - The MCP server is not called.
 - The result is `ASK / Reject`.
 
+LibreChat's native UI can label a rejected pending tool call **Cancelled**.
+For this demo, that is the expected `ASK / Reject` result: no MCP call and no
+state change. It is not the same as a policy `DENY`.
+
 If the assistant still asks for a ticket in `dev`, do not continue that old
 conversation. Start a new chat after the deployment restart so the current
 agent instructions and MCP schema are loaded.
@@ -188,7 +192,8 @@ Expected behavior:
 - LibreChat shows the native approval prompt again.
 - Choose **Approve**.
 - One harmless local demo state change is recorded.
-- The result is `ASK / Approve`.
+- The MCP response is formatted as `ASK / APPROVE` and reports one MCP call,
+  no AWS or infrastructure mutation, and no secret access.
 
 ### DENY: deletion prohibited
 
