@@ -1,296 +1,294 @@
 # STRICT EXECUTION CONTRACT — Issue #24 LibreChat Security Copilot governance
 
-Status: IMPLEMENTATION HANDOFF
-Owner of architecture/acceptance: ChatGPT
+Status: IMPLEMENTATION HANDOFF — HUMAN-APPROVED SCOPE EXPANSION
+Owner of architecture/acceptance: ChatGPT + Amit
 Implementation worker: Codex
 GitHub Issue: #24
+Draft PR: #25
 Target branch: `feature/issue-24-librechat-governance`
 
-## 0. Instruction priority
+## 0. Human decision supersedes the earlier stop boundary
 
-This file is authoritative for PR #25.
+Keep this work in **PR #25**. Do not create another Issue/branch/PR for the live tool proof.
 
-Codex must implement this contract as written. If current LibreChat behavior or repository reality makes a MUST requirement impossible, stop that implementation path and report a BLOCKER in PR #25 before implementing an alternative.
+The earlier blocker correctly proved that the existing custom routes are text-only and drop `tools` / `tool_calls`. Amit explicitly chose to enlarge this PR so it ends with enough successful live evidence rather than stopping at offline configuration proof.
 
-Do not silently substitute a custom approval system, another UI, another policy engine, or another PR.
+Small directly-related fixes required to complete the live provider validation belong in this PR.
 
 ## 1. Milestone objective
 
-Build one cohesive local POC proving four related governance behaviors:
+Complete one cohesive Security Copilot governance POC with:
 
 ```text
+OFFLINE GOVERNANCE
 CHECK / read-only       -> ALLOW
 REMEDIATE / controlled  -> ASK -> Approve or Reject
 DELETE / prohibited     -> DENY
 HIGH-RISK CONTEXT       -> trusted hook tightens policy
+
+LIVE PROVIDER PROOF
+A. Amazon Nova 2 Lite   -> real tool/MCP call through LibreChat native Bedrock path
+B. GPT-5.6 Luna         -> real tool/MCP call through a genuinely tool-capable Luna path
 ```
 
-This PR is deliberately milestone-sized rather than a micro-PR. Small fixes and directly-related implementation findings should normally stay in PR #25.
+The POC must finish with at least one real **LibreChat visible approval flow** working end to end. Prefer proving the full governance flow on both providers when credentials/provider support already exist.
 
-No real AWS mutation is required or allowed.
+No real remediation or cloud-resource mutation is allowed.
 
-## 2. Frozen architecture
+## 2. Repository blocker already proven
+
+`api/agentcore_openai_adapter.py` currently:
+
+- extracts only the latest user text;
+- sends only text to AgentCore/Codex/GovTechAI;
+- does not preserve `tools` or `tool_calls`;
+- returns only final assistant text.
+
+Changing the model name on those routes does not make them tool-capable.
+
+Do not claim the existing text-only routes are MCP/tool proof.
+
+## 3. Provider Track A — Nova 2 Lite via native Bedrock
+
+### Required architecture
 
 ```text
-User
-  |
-  v
-LibreChat
-  |
-  | native tool/MCP approval policy
-  |
-  +--> ALLOW -> check_security_finding
-  |
-  +--> ASK   -> apply_demo_remediation
-  |              +--> Approve -> one harmless demo effect
-  |              +--> Reject  -> no execution / no side effect
-  |
-  +--> DENY  -> delete_demo_asset never executes
-  |
-  +--> trusted approval hook -> may tighten ASK/DENY for high-risk context
-  |
-  v
-Tiny local/demo MCP or tool backend
+LibreChat Agent
+   -> native `bedrock` provider
+   -> Amazon Nova 2 Lite
+   -> LibreChat converts selected MCP tools to model tool definitions
+   -> model selects tool
+   -> LibreChat executes `agentcore_governance` MCP tool
+   -> native LibreChat approval policy controls ASK/DENY
 ```
 
-LibreChat is the operator-facing governance interaction layer. Future real Security Copilot actions must still be authorized by backend/AgentCore/IAM controls. A GUI approval button alone must never grant AWS authority.
+Use the already-proven model family/region where available. Preferred model:
 
-## 3. Required tools — exactly three
+`global.amazon.nova-2-lite-v1:0`
 
-### A. `check_security_finding` — ALLOW
+If LibreChat requires a regional/cross-region model ID instead, use the smallest equivalent Nova 2 Lite identifier that is actually available and record it.
 
-- read-only synthetic lookup;
-- no approval prompt;
-- deterministic public-safe result for `web-01`.
+### Authentication
 
-### B. `apply_demo_remediation` — ASK
+Prefer existing approved AWS authentication already present on the host:
 
-- pauses before execution;
-- native Approve / Reject interaction if current LibreChat supports it;
-- Reject: zero side effect;
-- Approve: exactly one harmless disposable local effect;
-- effect must be easy to reset.
+1. `BEDROCK_AWS_PROFILE` / AWS SDK provider chain; or
+2. an already-existing Bedrock bearer token/API key.
 
-### C. `delete_demo_asset` — DENY
+Do not create/rotate a new AWS credential merely for this test.
+Do not commit credentials.
 
-- blocked before implementation executes;
-- prove invocation count remains zero;
-- do not simulate success after denial.
+### Nova proof
 
-## 4. Required context-aware policy example
-
-Use LibreChat's trusted tool-approval hook capability if supported by the current installed version.
-
-Preferred synthetic policy:
-
-```text
-apply_demo_remediation(environment=dev)
-  -> normal ASK
-
-apply_demo_remediation(environment=prod, ticket="")
-  -> hook tightens policy -> DENY
-
-apply_demo_remediation(environment=prod, ticket="DEMO-123")
-  -> hook permits normal ASK -> still requires Approve / Reject
-```
-
-The hook may only tighten policy. It must not become a custom authorization engine.
-
-This test is context-aware policy only. It is not production RBAC and not User-A-request/User-B-approve workflow.
-
-If native hooks cannot support the required behavior cleanly, report:
-
-```text
-BLOCKER
-
-Expected behavior:
-...
-
-LibreChat/repository reality:
-...
-
-Native capability attempted:
-...
-
-Smallest options:
-1. ...
-2. ...
-
-Custom approval code written: NO
-Architecture changed: NO
-Decision required: ChatGPT / human
-```
-
-## 5. Native-first rule
-
-Prefer current native LibreChat capabilities:
-
-- `toolApproval.enabled`;
-- static `allow` / `ask` / `deny` rules;
-- MCP tool patterns;
-- native approval UI;
-- native checkpoint/resume behavior;
-- trusted approval hooks for context-aware tightening;
-- YAML/configuration over custom frontend code.
-
-Do not start by building custom React approval buttons or a custom Python/Node workflow engine.
-
-## 6. MUST
-
-1. Use LibreChat as the operator-facing UI.
-2. Implement exactly the three logical tools above.
-3. Demonstrate ALLOW without approval.
-4. Demonstrate ASK with both Reject and Approve paths.
-5. Prove Reject causes no side effect.
-6. Prove Approve causes exactly one expected harmless effect.
-7. Demonstrate DENY and prove the denied tool implementation never ran.
-8. Demonstrate one context-aware tightening example with a native trusted hook if supported; otherwise report a BLOCKER before any alternative.
-9. Keep all fixtures/evidence public-safe and synthetic.
-10. Add repeatable local/offline checks where practical.
-11. Document exact local run steps and sanitized proof.
-12. Keep existing repository validation passing.
-13. Keep the implementation understandable in a 3-5 minute demo.
-
-## 7. MUST NOT
-
-Do not add:
-
-- real EC2, SSM, Inspector, IAM, WAF, or other AWS mutation;
-- AWS credentials inside LibreChat;
-- real remediation;
-- replacement of AgentCore/SecCop architecture;
-- separate approver queue;
-- User A requests / User B approves workflow;
-- production RBAC or SSO;
-- ServiceNow/ticketing integration;
-- RAG/vector database;
-- LiteLLM unless ChatGPT explicitly approves a documented blocker;
-- Kubernetes/EKS;
-- large LibreChat fork;
-- custom enterprise policy engine;
-- replacement Issue/branch/PR.
-
-## 8. Expected implementation shape
-
-Exact paths may change after repository inspection. Prefer a compact shape such as:
-
-```text
-integration/librechat-governance/
-  librechat.yaml.example
-  README.md
-  demo-tools.*
-  approval-hook.*
-  fixture.*
-  test/check script
-
-docs/
-  ISSUE24_GOVERNANCE_PROOF.md
-```
-
-Fewer files are preferable when clear. Do not add layers merely to match this example.
-
-## 9. Acceptance tests
-
-### Test 1 — ALLOW
+At minimum prove live:
 
 ```text
 Prompt: Check the security finding for web-01.
-Expected: tool executes directly; no approval prompt; deterministic result returned.
+Expected: Nova selects `check_security_finding`; deterministic synthetic finding returns.
 ```
 
-### Test 2 — ASK / Reject
+If that works, run the full governance flow with Nova:
+
+- ALLOW check;
+- ASK -> Reject;
+- ASK -> Approve;
+- DENY delete;
+- context DENY / context ASK.
+
+## 4. Provider Track B — GPT-5.6 Luna
+
+GPT-5.6 Luna is known to support tools/MCP. This milestone must prove that capability with the same synthetic governance tool surface rather than assuming it.
+
+Use this preference order.
+
+### B1 — existing GovTechAI Luna capability probe first
+
+The repository already has a protected GovTechAI configuration and `gpt-5.6-luna` route.
+
+Before changing adapter code, make one **sanitized provider capability probe** against the existing Responses-style provider using one harmless synthetic function/tool definition.
+
+Do not log the API key or raw sensitive headers.
+
+If the provider returns a real tool/function call, implement the **smallest protocol translation** needed in the existing adapter so LibreChat `tools` / tool results are preserved for the Luna route.
+
+The adapter may translate protocol only. It must not become a second agent, policy engine, or tool executor.
+
+Required translation boundary if B1 is viable:
 
 ```text
-Prompt: Apply the remediation for web-01.
-Decision: Reject.
-Expected: tool does not execute; demo state unchanged.
+LibreChat tools + messages
+   -> minimal Chat-Completions/Responses translation
+   -> gpt-5.6-luna
+   -> tool/function call
+   -> LibreChat executes MCP tool under native approval policy
+   -> tool result returned to Luna
+   -> final assistant response
 ```
 
-### Test 3 — ASK / Approve
+### B2 — official OpenAI API only if already available
+
+If B1 is not tool-capable, and an already-approved `OPENAI_API_KEY` is available, configure LibreChat's native OpenAI provider with:
+
+`gpt-5.6-luna`
+
+and run the same live tool/approval proof.
+
+Do not create a new OpenAI API account, key, or billing commitment automatically.
+
+### B3 — existing Codex subscription as independent model/MCP proof
+
+If neither B1 nor B2 can provide a LibreChat-backed Luna path without new credentials, use the already-authenticated Codex CLI/App Server environment to prove **GPT-5.6 Luna can discover and invoke the same MCP tool**.
+
+This B3 proof validates Luna + MCP/model capability, but it does **not** count as LibreChat approval proof. Record that distinction explicitly.
+
+Do not rewrite LibreChat to imitate Codex approval UX.
+
+## 5. Required governance tools — exactly three
+
+### `check_security_finding` — ALLOW
+- read-only synthetic lookup;
+- deterministic public-safe result for `web-01`;
+- no side effect.
+
+### `apply_demo_remediation` — ASK
+- native LibreChat Approve / Reject interaction;
+- Reject: zero effect;
+- Approve: exactly one harmless disposable local effect;
+- easy reset.
+
+### `delete_demo_asset` — DENY
+- blocked before tool implementation executes;
+- invocation count remains zero.
+
+## 6. Context-aware tightening
+
+Keep the existing trusted hook policy:
 
 ```text
-Prompt: Apply the remediation for web-01.
-Decision: Approve.
-Expected: tool executes once; exactly one expected harmless state change.
+remediation(environment=dev)
+  -> ASK
+
+remediation(environment=prod, ticket="")
+  -> DENY
+
+remediation(environment=prod, ticket="DEMO-123")
+  -> ASK -> Approve / Reject
 ```
 
-### Test 4 — DENY
+The hook may only tighten policy. It must never bypass ASK or become an authorization engine.
+
+## 7. MUST
+
+1. Keep LibreChat as the operator-facing governance UI.
+2. Keep exactly the three logical demo tools.
+3. Preserve native `toolApproval` ALLOW / ASK / DENY and trusted hook behavior.
+4. Preserve all existing offline governance tests.
+5. Run a real Nova 2 Lite tool/MCP validation through native Bedrock if current AWS access permits it.
+6. Run a real GPT-5.6 Luna tool/MCP validation using B1, B2, or B3 above.
+7. At least one provider must produce a real visible LibreChat MCP/tool call; a text-only answer is not success.
+8. At least one provider must prove the live LibreChat ASK interaction with Reject and Approve.
+9. Prefer full ALLOW/ASK/DENY/context live proof for both providers when practical with existing credentials.
+10. Keep model/provider calls minimal and low-cost.
+11. Keep evidence sanitized and state exactly which provider/path produced it.
+12. Run repository validation after implementation.
+
+## 8. MUST NOT
+
+Do not add:
+
+- real EC2/SSM/Inspector/IAM/WAF remediation or mutation;
+- creation/rotation of new AWS credentials;
+- automatic creation of a new OpenAI API account/key/billing setup;
+- credentials committed to Git;
+- custom React approval buttons;
+- a second policy/approval engine;
+- User A requests / User B approves workflow;
+- production RBAC/SSO;
+- ServiceNow/ticketing;
+- RAG/vector DB;
+- LiteLLM;
+- Kubernetes/EKS;
+- a large LibreChat fork;
+- replacement Issue/branch/PR.
+
+## 9. Adapter-change rule
+
+A small protocol translation change is allowed in PR #25 **only for Track B1** if the live GovTechAI Luna capability probe proves the upstream provider can return tool/function calls.
+
+Allowed:
+- preserve `tools` from LibreChat;
+- translate supported tool schemas to the provider request;
+- translate provider tool calls back to the OpenAI-compatible shape LibreChat expects;
+- preserve tool-result follow-up messages;
+- add focused tests.
+
+Not allowed:
+- tool execution inside the adapter;
+- policy decisions inside the adapter;
+- model-side fake tool responses;
+- replacing LibreChat MCP/approval with custom orchestration.
+
+If the provider itself rejects tool definitions, do not build fake adapter behavior around it.
+
+## 10. Acceptance matrix
+
+Record PASS / BLOCKED with evidence for each row:
+
+| Path | Tool call | LibreChat ALLOW | ASK Reject | ASK Approve | DENY | Context | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Nova 2 Lite / native Bedrock | | | | | | | |
+| GPT-5.6 Luna / B1 or B2 | | | | | | | |
+| GPT-5.6 Luna / B3 subscription | model/MCP proof only | N/A | N/A | N/A | N/A | N/A | |
+
+Success minimum:
 
 ```text
-Prompt: Delete web-01.
-Expected: blocked before execution; denied tool invocation count remains zero.
+existing offline governance = PASS
+Nova tool-capability validation = PASS or evidence-backed provider/access BLOCKED
+Luna tool-capability validation = PASS
+at least one real LibreChat tool call = PASS
+at least one full live ASK Reject + Approve flow = PASS
 ```
 
-### Test 5 — context DENY
+The preferred result is both Nova and Luna passing the live LibreChat matrix.
 
-```text
-Prompt/tool args: remediation for environment=prod without demo ticket.
-Expected: trusted hook tightens policy to DENY; tool does not execute.
-```
+## 11. Evidence
 
-### Test 6 — context ASK
+Update `docs/ISSUE24_GOVERNANCE_PROOF.md` with:
 
-```text
-Prompt/tool args: remediation for environment=prod with ticket=DEMO-123.
-Expected: context hook does not bypass approval; normal ASK remains and user must Approve/Reject.
-```
+- provider/model actually selected;
+- exact sanitized prompt;
+- tool selected;
+- approval event observed;
+- tool invocation counter/state before and after;
+- final synthetic result;
+- which credentials path was used by category only (profile, bearer token, protected API key), never secret values;
+- cost-impact note (model inference only; no infrastructure mutation);
+- any provider limitation/blocker.
 
-## 10. Evidence
-
-Final PR must include sanitized proof showing:
-
-- ALLOW executed;
-- ASK visibly paused;
-- Reject did not execute;
-- Approve executed exactly once;
-- DENY did not execute;
-- context hook tightened high-risk request;
-- context hook never bypassed ASK;
-- no AWS credentials/calls were required;
-- no custom approval UI was introduced unless explicitly approved after a BLOCKER.
-
-## 11. Milestone sizing / PR reuse rule
-
-During PR #25, keep directly-related work in this PR when it is required to complete, test, document, or safely operate the frozen governance milestone.
-
-Do **not** create a new Issue/PR for every small fix.
-
-Create a new Issue/PR only when work materially changes one of these boundaries:
-
-1. architecture;
-2. security/authorization model;
-3. user workflow (for example second-user approval);
-4. external system integration (real AWS, ServiceNow, etc.);
-5. unrelated product capability.
-
-When uncertain, report the proposed extension in PR #25 and let ChatGPT/human decide whether it remains in-scope.
+Do not publish raw private responses or secrets.
 
 ## 12. Codex working protocol
 
 Codex must:
 
-1. read Issue #24, PR #25, and this contract before coding;
-2. inspect current repository truth;
-3. work only on `feature/issue-24-librechat-governance`;
-4. continue existing Draft PR #25 only;
-5. keep implementation coherent with the frozen milestone;
-6. run repeatable tests and repository validation;
-7. post sanitized proof and one implementation-summary comment;
-8. report blockers before architecture changes.
+1. read Issue #24, PR #25, this contract, and the latest blocker/follow-up comments;
+2. work only on `feature/issue-24-librechat-governance`;
+3. continue Draft PR #25 only;
+4. keep directly-related provider/tool fixes in this PR;
+5. prefer native LibreChat provider/tool behavior;
+6. test provider capability before adding translation code;
+7. run repeatable tests and repository validation;
+8. post one updated implementation-summary comment with the acceptance matrix.
 
 Codex must not:
-
-- create a replacement PR;
-- weaken this contract to fit an easier implementation;
-- silently replace native LibreChat approval with a custom workflow;
-- mark PR #25 ready;
+- create another Issue/branch/PR;
+- mark PR #25 Ready;
 - merge PR #25;
 - close Issue #24.
 
 ## 13. Definition of done
 
-A reviewer can reproduce all required paths and conclude:
+A reviewer can conclude, from live and offline evidence:
 
-> LibreChat can present a useful Security Copilot governance interaction: safe reads execute automatically, controlled actions require explicit human approval, rejected actions do not execute, prohibited actions are blocked before execution, and higher-risk context can tighten policy without bypassing approval.
-
-Real AWS mutation, cross-user approval, production RBAC/SSO, or a different architecture requires a later milestone.
+> LibreChat can govern synthetic Security Copilot tools with ALLOW / ASK / DENY and context-aware tightening; at least one real tool-capable model completes the visible approval flow; Nova 2 Lite and GPT-5.6 Luna have both been actually validated rather than assumed; and no real remediation or infrastructure mutation occurred.
