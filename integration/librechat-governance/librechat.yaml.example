@@ -38,7 +38,9 @@ endpoints:
         - matcher: apply_demo_remediation_mcp_agentcore_governance
           module: /absolute/path/to/AgentCore/integration/librechat-governance/approval-hook.cjs
     checkpointer:
-      type: memory
+      # Native approval resumes on a fresh request. Use the deployment's
+      # primary MongoDB so an approved decision can survive that boundary.
+      type: mongo
       ttl: 3600
 
 interface:
@@ -53,5 +55,5 @@ interface:
     share: false
     public: false
 
-# For a retained deployment use LibreChat's Mongo checkpointer. Memory is
-# intentionally selected here so this POC has no database dependency.
+# Mongo is LibreChat's primary-database checkpointer and is required for a
+# retained approval/resume demo. The MCP tools remain fully synthetic.

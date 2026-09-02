@@ -32,7 +32,7 @@ class GovernanceContractTests(unittest.TestCase):
             "mcp:agentcore_governance:apply_demo_remediation",
             "mcp:agentcore_governance:delete_demo_asset",
             "checkpointer:",
-            "type: memory",
+            "type: mongo",
             "ASK - Review {tool}.",
             "blank ticket is valid in dev",
             "Reject = no MCP call and no state change",

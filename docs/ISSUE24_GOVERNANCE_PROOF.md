@@ -86,20 +86,38 @@ apply_demo_remediation_mcp_agentcore_governance => ask
 delete_demo_asset_mcp_agentcore_governance => deny
 ```
 
-This is configuration/provider evidence, not a substitute for the requested
-fresh-chat GUI proof. Start a new conversation after a restart; the configured
-`memory` checkpointer is process-local, so an old paused conversation must not
-be reused as a live acceptance run.
+The deployed process uses LibreChat's durable MongoDB checkpointer. A prior
+restart left an old Node child on port 80; that process was stopped and a new
+backend was verified healthy before the successful native approval run.
 
 ### Native UI interpretation
 
-After selecting **Reject** on an ASK card, LibreChat may show the pending tool
-call as **Cancelled**. For this synthetic demo that is the expected
-`ASK / Reject` proof: the MCP server is not called and the state file remains
-unchanged. It is distinct from `DENY`, which blocks the tool before an approval
-card appears. After **Approve**, the synthetic server returns a Markdown
-`ASK / APPROVE` result with one MCP call, no AWS/infrastructure mutation, and
-no secret access.
+The live GUI proof is retained under `docs/presentation/issue24-governance/`:
+
+- `03-ask-native-prompt.png` shows native ASK before execution.
+- `04-ask-approve-result.png` shows Approve/Submit resumed the run and returned
+  `ASK / APPROVE - Remediation completed`, one MCP call, one harmless local
+  effect, no AWS/infrastructure mutation, and no secrets accessed.
+- `05-ask-reject-then-approve.png` records the separate Reject then Approve
+  exercise. LibreChat may label a rejected pending call **Cancelled**; that is
+  the native ASK/Reject representation and causes no MCP call.
+
+The state file after the separate approved exercises reports `remediated=true`
+and `remediation_calls=2`; this is an aggregate counter. Each completed UI
+result reports exactly one call for its own approval run.
+
+### Accepted DELETE boundary
+
+For `Delete web-01.`, Luna safely refuses before emitting
+`delete_demo_asset`. Consequently, the visible native LibreChat deny
+interception is not exercised. This is accepted for this POC because the
+static/native policy probe resolves the concrete delete key to `deny`, and the
+synthetic state retains `delete_calls=0`.
+
+No forcing mechanism was added: tool approval evaluates a model-emitted call;
+it does not compel the model to issue one. The generic model refusal is kept as
+`nonfinal-delete-model-refusal.png` to document the boundary, not as a native
+DENY success claim.
 
 The saved Agent instructions also require the assistant to begin final text
 with `ALLOW`, `ASK / REJECT`, `ASK / APPROVE`, or `DENY`. This keeps a model's
@@ -116,12 +134,12 @@ The bounded fix was:
 4. retain Markdown status output from the synthetic MCP server;
 5. restart LibreChat and verify the saved Agent and HTTP health.
 
-The saved `AgentCore Governance Demo` instructions were updated in the retained
-deployment and the previous text was backed up privately. The latest saved
-version now requires the exact prefixes and tells the model not to emit a
-second call while an approval card is pending. The remote verification found
-one matching Agent, five saved versions, and the latest instructions length
-matching the new contract; HTTP health returned `200` after restart.
+The saved `AgentCore Governance Demo` instructions are versioned in the
+retained deployment and the previous text is backed up privately. The current
+version requires the exact prefixes and prevents a duplicate call while an
+approval card is pending. Even after it was updated to request the delete tool,
+Luna safely chose a model-level refusal; the accepted DELETE boundary above
+records that live behavior honestly.
 
 No custom approval UI was added: LibreChat's fixed **Approve**, **Reject**, and
 **Submit** labels and native styling remain the source of truth.
@@ -172,13 +190,14 @@ The repository-wide check also runs this test:
   existing EC2 role because `bedrock:InvokeModel` is denied by identity policy.
 - **READ-ONLY PROVEN:** the synthetic check has no mutation and the test makes
   no network or AWS call.
-- **PLANNED:** capture the corrected native LibreChat approval UI/checkpoint
-  interaction in a fresh chat for check, remediation Reject, remediation
-  Approve, delete, and context-policy prompts.
-- **NOT PROVEN:** a visible LibreChat MCP tool call and native ASK Reject /
-  Approve screenshots in this run; real AWS/Inspector authorization;
-  production RBAC; multi-user approval; ticketing; or durable production
-  persistence.
+- **LIVE GUI-PROVEN:** native ASK prompt, Reject/Cancelled with no MCP call,
+  and Approve/Submit with exactly one MCP call and one harmless local effect
+  for that run; no AWS/infrastructure mutation and no secret access.
+- **ACCEPTED BOUNDARY:** DELETE is a safe model-level refusal before tool
+  emission; static policy resolves `delete_demo_asset` to `deny`, and
+  `delete_calls=0`. A visible native DENY interception is not claimed.
+- **NOT PROVEN:** real AWS/Inspector authorization; production RBAC;
+  multi-user approval; ticketing; or durable production persistence.
 
 No screenshot is treated as proof of AWS state. A future live run must retain
 the MCP state file and LibreChat decision evidence separately.

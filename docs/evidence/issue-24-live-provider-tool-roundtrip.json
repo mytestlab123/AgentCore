@@ -8,7 +8,24 @@
   "adapter_protocol_translation": "PASS",
   "adapter_executes_tools": false,
   "adapter_makes_policy_decisions": false,
-  "native_librechat_gui_proof": "PENDING_MANUAL_BROWSER_RUN",
+  "native_librechat_gui_proof": {
+    "ask_reject": "PASS",
+    "ask_approve": "PASS",
+    "approve_result": "one MCP call and one harmless local effect for the approved run",
+    "aws_or_infrastructure_mutation": "none",
+    "secrets_accessed": "none",
+    "delete": {
+      "status": "ACCEPTED_BOUNDARY",
+      "result": "model refused before tool emission; native deny interception not visually exercised",
+      "static_policy_probe": "DENY",
+      "delete_calls": 0
+    },
+    "screenshots": [
+      "docs/presentation/issue24-governance/03-ask-native-prompt.png",
+      "docs/presentation/issue24-governance/04-ask-approve-result.png",
+      "docs/presentation/issue24-governance/05-ask-reject-then-approve.png"
+    ]
+  },
   "native_bedrock_nova_2_lite": {
     "status": "BLOCKED",
     "reason": "existing EC2 role lacks bedrock:InvokeModel"

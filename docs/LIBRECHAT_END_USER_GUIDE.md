@@ -77,9 +77,9 @@ card is visible, do not make a second tool call. After approval, return the MCP
 result verbatim; do not paraphrase its status label.
 For prod remediation, include a `DEMO-*` ticket only when the user supplies
 one; otherwise do not call the tool.
-Never call `delete_demo_asset`. For a deletion request, reply exactly:
-
-`DENY - Deletion blocked. No MCP call was made; no asset changed.`
+For a deletion request, call `delete_demo_asset` once with the requested host.
+LibreChat's native policy must deny it before the MCP implementation runs.
+Return the policy result verbatim; never claim that a deletion occurred.
 Keep responses short and start every final response with exactly one of these
 labels:
 
@@ -219,9 +219,12 @@ Delete web-01.
 
 Expected behavior:
 
-- LibreChat blocks the tool call before execution.
-- No state change occurs.
-- The result is `DENY`.
+- Luna may safely refuse before emitting the delete tool.
+- The native policy probe still resolves `delete_demo_asset` to `deny`.
+- No state change occurs and `delete_calls` remains zero.
+
+This is an accepted POC boundary. Do not force a delete tool call merely to
+manufacture a native DENY screenshot.
 
 ### High-risk context: trusted hook
 
