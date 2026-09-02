@@ -3,6 +3,20 @@
 set -o errexit -o nounset -o pipefail
 
 repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+guide_file="$repo_dir/docs/NOVA_FAMILY_GUIDE.md"
+
+if rg -n 'aws[[:space:]]+bedrock[[:space:]]+create-long-term-api-key' "$guide_file"; then
+  echo 'NO-GO: obsolete Bedrock key command is still documented.' >&2
+  exit 1
+fi
+rg -n 'create-service-specific-credential' "$guide_file" >/dev/null
+rg -n -- '--service-name[[:space:]]+bedrock\.amazonaws\.com' "$guide_file" >/dev/null
+rg -n 'umask[[:space:]]+077|chmod[[:space:]]+600' "$guide_file" >/dev/null
+if rg -n '/tmp/[^[:space:]]*(key|credential)[^[:space:]]*\.json' "$guide_file"; then
+  echo 'NO-GO: predictable /tmp credential/key path is still documented.' >&2
+  exit 1
+fi
+echo 'Offline credential-guide regression checks passed.'
 
 for script in "$repo_dir"/*.sh "$repo_dir"/scripts/*.sh; do
   /usr/bin/bash -n "$script"

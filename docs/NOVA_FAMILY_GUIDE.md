@@ -418,15 +418,42 @@ aws bedrock list-inference-profiles \
 
 **DO NOT create keys before confirming model availability**
 
-```bash
-# Create Nova 2 Pro-specific key after entitlement confirmed
-aws bedrock create-long-term-api-key \
-  --name "nova-2-pro-preview-dev" \
-  --region us-east-2 \
-  --output json > /tmp/nova-2-pro-key.json
+The repository's authoritative workflow uses an IAM service-specific
+credential. The one-time response contains secret material, so create the
+directory with a restrictive umask, write only to a private per-user path,
+and never print or commit the response:
 
-# Extract and save securely
+```bash
+umask 077
+private_dir="${XDG_STATE_HOME:-$HOME/.local/state}/agentcore/bedrock"
+install -d -m 700 "$private_dir"
+credential_file="$private_dir/nova-2-pro-credential.json"
+
+aws iam create-service-specific-credential \
+  --profile "${AWS_PROFILE:?set the approved profile}" \
+  --user-name "${BEDROCK_KEY_USER:?set the dedicated IAM user}" \
+  --service-name bedrock.amazonaws.com \
+  --credential-age-days 30 \
+  >"$credential_file"
+chmod 600 "$credential_file"
+
+# Use the secret once, then remove the response file when no longer needed.
+rm -f -- "$credential_file"
 ```
+
+Prefer the repeatable repository wrapper, which applies the same private
+evidence and cleanup controls:
+
+```bash
+./scripts/bedrock-api-key-poc.sh --plan
+```
+
+The credential response and any bearer token must never be logged, placed in
+`/tmp`, added to shell history, or committed. Keep only sanitized metadata
+(for example, a short fingerprint) in private evidence. Removing the local
+file does not revoke the AWS credential; use the IAM
+`delete-service-specific-credential` operation through the owning cleanup
+workflow when the credential itself must be revoked.
 
 ### Step 4: Update IAM Policy for New Profiles
 
