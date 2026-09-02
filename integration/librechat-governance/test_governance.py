@@ -33,9 +33,9 @@ class GovernanceContractTests(unittest.TestCase):
             "mcp:agentcore_governance:delete_demo_asset",
             "checkpointer:",
             "type: memory",
-            "ASK - Human decision required for remediation.",
-            "Reject = no MCP call",
-            "Approve = one harmless local effect",
+            "ASK - Review {tool}.",
+            "blank ticket is valid in dev",
+            "Reject = no MCP call and no state change",
         ):
             self.assertIn(value, config)
         # The remediation name appears once in `ask` and once in the hook
