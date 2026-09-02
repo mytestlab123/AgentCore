@@ -106,6 +106,16 @@ This only confirms that the agent chat is responding. It does **not** prove
 that an MCP tool ran. Use the exact proof prompts in the next section to test
 the governance policy and tool wiring.
 
+### Current live-provider limitation
+
+The current AgentCore, Codex Subscription, and GovTechAI entries are custom
+text-only adapters. They accept the chat text but do not implement the
+OpenAI-compatible `tools` / `tool_calls` exchange required for a model to call
+MCP tools. Therefore a live chat may answer conversationally instead of
+opening the native approval prompt. The native MCP policy and tool behavior are
+covered by the offline proof until a separate tool-capable provider or adapter
+is approved. Do not present a text-only response as live ALLOW/ASK/DENY proof.
+
 ## 4. Run the five-minute proof
 
 Select `AgentCore Governance Demo`, then send each prompt below.
