@@ -88,6 +88,24 @@ Keep responses short and label the policy result as ALLOW, ASK, or DENY.
 
 The agent should now be selectable from the Agents side-panel dropdown.
 
+### Optional setup smoke check
+
+You may send:
+
+```text
+Confirm that you are ready for the AgentCore governance demonstration.
+```
+
+An answer such as the following is expected:
+
+```text
+ALLOW - Ready for the AgentCore governance demonstration.
+```
+
+This only confirms that the agent chat is responding. It does **not** prove
+that an MCP tool ran. Use the exact proof prompts in the next section to test
+the governance policy and tool wiring.
+
 ## 4. Run the five-minute proof
 
 Select `AgentCore Governance Demo`, then send each prompt below.
@@ -103,8 +121,12 @@ Check the security finding for web-01.
 Expected behavior:
 
 - LibreChat allows the tool call immediately.
-- The response reports the synthetic finding.
+- The response reports the synthetic finding for `web-01`.
 - The result is labelled `ALLOW`.
+
+If this exact prompt returns only a generic readiness message, return to the
+Agent Builder and verify that the `agentcore_governance` MCP server and its
+three tools are enabled before testing again.
 
 ### ASK / Reject: remediation refused
 
@@ -262,4 +284,3 @@ screenshot supports UI evidence but does not prove AWS execution.
 - Environment endpoints: https://www.librechat.ai/docs/configuration/dotenv#endpoints
 - Agents YAML: https://www.librechat.ai/docs/configuration/librechat_yaml/object_structure/agents
 - Admin Panel: https://www.librechat.ai/docs/features/admin_panel
-
