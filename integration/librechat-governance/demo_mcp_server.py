@@ -25,13 +25,29 @@ TOOLS = [
     },
     {
         "name": "apply_demo_remediation",
-        "description": "Harmless local demo effect; LibreChat must require approval.",
+        "description": (
+            "Harmless local demo effect. For environment=dev, call this tool "
+            "directly with host and environment; ticket is optional. Do not "
+            "ask the user to confirm; native LibreChat approval handles the "
+            "decision. For environment=prod, ticket must start with DEMO-."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
-                "host": {"type": "string", "enum": ["web-01"]},
-                "environment": {"type": "string", "enum": ["dev", "prod"]},
-                "ticket": {"type": "string"},
+                "host": {
+                    "type": "string",
+                    "enum": ["web-01"],
+                    "description": "Synthetic demo host; use web-01.",
+                },
+                "environment": {
+                    "type": "string",
+                    "enum": ["dev", "prod"],
+                    "description": "Use dev for the harmless default proof.",
+                },
+                "ticket": {
+                    "type": "string",
+                    "description": "Optional in dev; required with DEMO-* prefix in prod.",
+                },
             },
             "required": ["host", "environment"],
         },

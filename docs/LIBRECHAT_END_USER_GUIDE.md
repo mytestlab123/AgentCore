@@ -171,6 +171,10 @@ Expected behavior:
 - The MCP server is not called.
 - The result is `ASK / Reject`.
 
+If the assistant still asks for a ticket in `dev`, do not continue that old
+conversation. Start a new chat after the deployment restart so the current
+agent instructions and MCP schema are loaded.
+
 ### ASK / Approve: remediation accepted
 
 Send the same prompt again:

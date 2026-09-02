@@ -73,6 +73,11 @@ dev request and let native LibreChat approval handle the human decision. A
 backup of the prior instructions remains on the private host; no secret was
 changed.
 
+The remediation MCP schema now states the same rule at the tool boundary:
+`ticket` is optional in `dev`, while `prod` requires a `DEMO-*` ticket. This
+reduces model ambiguity without moving approval or authorization into the MCP
+server.
+
 The policy decision probe after the correction returned:
 
 ```text
