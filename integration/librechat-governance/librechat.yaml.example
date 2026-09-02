@@ -1,0 +1,59 @@
+version: 1.2.1
+
+# Copy this example into the LibreChat deployment configuration and replace
+# the absolute paths with paths on that host.
+mcpServers:
+  agentcore_governance:
+    command: /usr/bin/python3
+    args:
+      - /absolute/path/to/AgentCore/integration/librechat-governance/demo_mcp_server.py
+    env:
+      GOVERNANCE_STATE_FILE: /absolute/path/to/private/agentcore-governance/state.json
+    chatMenu: false
+
+endpoints:
+  agents:
+    disableBuilder: false
+    capabilities:
+      - tools
+      - ask_user_question
+    toolApproval:
+      enabled: true
+      mode: default
+      allow:
+        - mcp:agentcore_governance:check_security_finding
+        # LibreChat persists MCP keys with the `_mcp_` delimiter. Keep the
+        # concrete spelling as well so existing agents receive the same rule.
+        - check_security_finding_mcp_agentcore_governance
+      ask:
+        - mcp:agentcore_governance:apply_demo_remediation
+        - apply_demo_remediation_mcp_agentcore_governance
+      deny:
+        - mcp:agentcore_governance:delete_demo_asset
+        - delete_demo_asset_mcp_agentcore_governance
+      reason: "ASK - Review {tool}. The parameters below are a synthetic demo request: blank ticket is valid in dev. Approve = one harmless local marker, no AWS or secret access. Reject = no MCP call and no state change."
+      hooks:
+        - matcher: mcp:agentcore_governance:apply_demo_remediation
+          module: /absolute/path/to/AgentCore/integration/librechat-governance/approval-hook.cjs
+        - matcher: apply_demo_remediation_mcp_agentcore_governance
+          module: /absolute/path/to/AgentCore/integration/librechat-governance/approval-hook.cjs
+    checkpointer:
+      # Native approval resumes on a fresh request. Use the deployment's
+      # primary MongoDB so an approved decision can survive that boundary.
+      type: mongo
+      ttl: 3600
+
+interface:
+  agents:
+    use: true
+    create: true
+    share: false
+    public: false
+  mcpServers:
+    use: true
+    create: false
+    share: false
+    public: false
+
+# Mongo is LibreChat's primary-database checkpointer and is required for a
+# retained approval/resume demo. The MCP tools remain fully synthetic.

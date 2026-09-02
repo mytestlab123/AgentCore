@@ -1,8 +1,9 @@
 """Minimal OpenAI-compatible adapter for the Issue #19 LibreChat proof.
 
-The adapter only translates chat-completions requests into the official
-AgentCore CLI Harness invocation. It never calls Bedrock Runtime directly and
-does not implement arbitrary model, tool, or provider selection.
+The adapter translates chat-completions requests into the official AgentCore
+CLI Harness, Codex CLI, or protected GovTechAI Responses invocation. Its
+GovTechAI path preserves function-call protocol data but never executes tools
+or makes policy decisions; LibreChat remains the MCP and approval owner.
 """
 
 from __future__ import annotations
@@ -50,7 +51,17 @@ PLATFORM_MODELS = {
 }
 
 
-def _response(request_id: str, text: str, model: str = "agentcore-nova-2-lite") -> dict[str, Any]:
+def _response(
+    request_id: str,
+    text: str | None,
+    model: str = "agentcore-nova-2-lite",
+    tool_calls: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    message: dict[str, Any] = {"role": "assistant", "content": text}
+    finish_reason = "stop"
+    if tool_calls:
+        message["tool_calls"] = tool_calls
+        finish_reason = "tool_calls"
     return {
         "id": request_id,
         "object": "chat.completion",
@@ -59,8 +70,8 @@ def _response(request_id: str, text: str, model: str = "agentcore-nova-2-lite") 
         "choices": [
             {
                 "index": 0,
-                "message": {"role": "assistant", "content": text},
-                "finish_reason": "stop",
+                "message": message,
+                "finish_reason": finish_reason,
             }
         ],
     }
@@ -88,6 +99,34 @@ def _stream_events(request_id: str, text: str, model: str = "agentcore-nova-2-li
             "created": 0,
             "model": model,
             "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+        },
+    ]
+
+
+def _stream_tool_events(
+    request_id: str, tool_calls: list[dict[str, Any]], model: str
+) -> list[dict[str, Any]]:
+    """Return OpenAI SSE chunks for a provider function call."""
+    return [
+        {
+            "id": request_id,
+            "object": "chat.completion.chunk",
+            "created": 0,
+            "model": model,
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {"role": "assistant", "tool_calls": tool_calls},
+                    "finish_reason": None,
+                }
+            ],
+        },
+        {
+            "id": request_id,
+            "object": "chat.completion.chunk",
+            "created": 0,
+            "model": model,
+            "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}],
         },
     ]
 
@@ -189,29 +228,158 @@ def invoke_codex(prompt: str, model: str = CODEX_DEFAULT_MODEL) -> str:
     raise RuntimeError("Codex subscription returned no text")
 
 
-def _platform_text(response: dict[str, Any]) -> str:
+def _message_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            part.get("text", "")
+            for part in content
+            if isinstance(part, dict) and isinstance(part.get("text"), str)
+        )
+    return ""
+
+
+def _responses_input(messages: list[Any]) -> list[dict[str, Any]]:
+    """Translate Chat Completions messages into Responses input items."""
+    translated: list[dict[str, Any]] = []
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        role = message.get("role")
+        if role in {"system", "user"}:
+            content = _message_text(message.get("content"))
+            if content:
+                translated.append({"role": role, "content": content})
+            continue
+        if role == "assistant":
+            content = _message_text(message.get("content"))
+            if content:
+                translated.append({"role": "assistant", "content": content})
+            for call in message.get("tool_calls", []):
+                if not isinstance(call, dict):
+                    continue
+                function = call.get("function", {})
+                if not isinstance(function, dict):
+                    function = {}
+                name = function.get("name") or call.get("name")
+                arguments = function.get("arguments", call.get("arguments", "{}"))
+                call_id = call.get("id") or call.get("call_id")
+                if isinstance(name, str) and isinstance(call_id, str):
+                    if not isinstance(arguments, str):
+                        arguments = json.dumps(arguments, separators=(",", ":"))
+                    translated.append(
+                        {
+                            "type": "function_call",
+                            "call_id": call_id,
+                            "name": name,
+                            "arguments": arguments,
+                        }
+                    )
+            continue
+        if role == "tool":
+            call_id = message.get("tool_call_id") or message.get("call_id")
+            output = _message_text(message.get("content"))
+            if isinstance(call_id, str):
+                translated.append(
+                    {
+                        "type": "function_call_output",
+                        "call_id": call_id,
+                        "output": output,
+                    }
+                )
+    if not translated:
+        raise ValueError("messages must contain supported text")
+    return translated
+
+
+def _responses_tools(tools: Any) -> list[dict[str, Any]]:
+    translated: list[dict[str, Any]] = []
+    if not isinstance(tools, list):
+        return translated
+    for tool in tools:
+        if not isinstance(tool, dict) or tool.get("type") != "function":
+            continue
+        function = tool.get("function", {})
+        if not isinstance(function, dict) or not isinstance(function.get("name"), str):
+            continue
+        item: dict[str, Any] = {
+            "type": "function",
+            "name": function["name"],
+        }
+        for key in ("description", "parameters", "strict"):
+            if key in function:
+                item[key] = function[key]
+        translated.append(item)
+    return translated
+
+
+def _platform_request_payload(payload: dict[str, Any], model: str) -> dict[str, Any]:
+    messages = payload.get("messages")
+    if not isinstance(messages, list):
+        raise ValueError("messages must be a list")
+    request_payload: dict[str, Any] = {
+        "model": model,
+        "input": _responses_input(messages),
+        "max_output_tokens": 700,
+    }
+    tools = _responses_tools(payload.get("tools"))
+    if tools:
+        request_payload["tools"] = tools
+    for key in ("tool_choice", "parallel_tool_calls"):
+        if key in payload:
+            request_payload[key] = payload[key]
+    if model == "gpt-5.6-luna":
+        request_payload["reasoning"] = {"effort": "low"}
+    return request_payload
+
+
+def _platform_text(response: dict[str, Any], *, required: bool = True) -> str:
     text = "".join(
         content.get("text", "")
         for item in response.get("output", [])
         for content in item.get("content", [])
         if content.get("type") == "output_text"
     )
-    if not text:
+    if not text and required:
         raise RuntimeError("GovTechAI returned no response text")
     return text
 
 
-def invoke_platform(prompt: str, model: str, authorization: str | None) -> str:
+def _platform_tool_calls(response: dict[str, Any]) -> list[dict[str, Any]]:
+    """Translate Responses function_call items; never executes or authorizes them."""
+    calls: list[dict[str, Any]] = []
+    for item in response.get("output", []):
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") not in {"function_call", "tool_call"}:
+            continue
+        function = item.get("function", {})
+        if not isinstance(function, dict):
+            function = {}
+        name = item.get("name") or function.get("name")
+        arguments = item.get("arguments", function.get("arguments", "{}"))
+        call_id = item.get("call_id") or item.get("id")
+        if isinstance(name, str) and isinstance(call_id, str):
+            if not isinstance(arguments, str):
+                arguments = json.dumps(arguments, separators=(",", ":"))
+            calls.append(
+                {
+                    "id": call_id,
+                    "type": "function",
+                    "function": {"name": name, "arguments": arguments},
+                }
+            )
+    return calls
+
+
+def invoke_platform_request(
+    payload: dict[str, Any], model: str, authorization: str | None
+) -> dict[str, Any]:
     if model not in PLATFORM_MODELS:
         raise RuntimeError("GovTechAI model is not in the approved allowlist")
     key, base_url = _platform_credentials(authorization)
-    request_payload: dict[str, Any] = {
-        "model": model,
-        "input": prompt,
-        "max_output_tokens": 700,
-    }
-    if model == "gpt-5.6-luna":
-        request_payload["reasoning"] = {"effort": "low"}
+    request_payload = _platform_request_payload(payload, model)
     request = urllib.request.Request(
         f"{base_url.rstrip('/')}/platform/models/v1/responses",
         data=json.dumps(request_payload).encode("utf-8"),
@@ -224,7 +392,10 @@ def invoke_platform(prompt: str, model: str, authorization: str | None) -> str:
     )
     try:
         with urllib.request.urlopen(request, timeout=60) as response:
-            return _platform_text(json.loads(response.read()))
+            body = json.loads(response.read())
+            if not isinstance(body, dict):
+                raise RuntimeError("GovTechAI returned an invalid response")
+            return body
     except urllib.error.HTTPError as error:
         if error.code in {401, 403}:
             raise RuntimeError("GovTechAI rejected the key or model") from error
@@ -233,6 +404,14 @@ def invoke_platform(prompt: str, model: str, authorization: str | None) -> str:
         raise RuntimeError("GovTechAI request failed") from error
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
         raise RuntimeError("GovTechAI request failed") from error
+
+
+def invoke_platform(prompt: str, model: str, authorization: str | None) -> str:
+    """Compatibility helper for the original text-only callers and tests."""
+    response = invoke_platform_request(
+        {"messages": [{"role": "user", "content": prompt}]}, model, authorization
+    )
+    return _platform_text(response)
 
 
 def _user_prompt(payload: dict[str, Any]) -> str:
@@ -304,13 +483,24 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _send_stream(self, request_id: str, text: str, model: str) -> None:
+    def _send_stream(
+        self,
+        request_id: str,
+        text: str | None,
+        model: str,
+        tool_calls: list[dict[str, Any]] | None = None,
+    ) -> None:
         self.send_response(200)
         self.send_header("content-type", "text/event-stream")
         self.send_header("cache-control", "no-cache")
         self.send_header("connection", "close")
         self.end_headers()
-        for event in _stream_events(request_id, text, model):
+        events = (
+            _stream_tool_events(request_id, tool_calls, model)
+            if tool_calls
+            else _stream_events(request_id, text or "", model)
+        )
+        for event in events:
             body = f"data: {json.dumps(event)}\n\n".encode("utf-8")
             self.wfile.write(body)
             self.wfile.flush()
@@ -361,17 +551,23 @@ class Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("content-length", "0"))
             payload = json.loads(self.rfile.read(length))
             if is_platform:
-                text = invoke_platform(
-                    _user_prompt(payload),
+                response = invoke_platform_request(
+                    payload,
                     str(payload.get("model", "")),
                     self.headers.get("authorization"),
                 )
+                text = _platform_text(response, required=False)
+                tool_calls = _platform_tool_calls(response)
+                if not text and not tool_calls:
+                    raise RuntimeError("GovTechAI returned no text or tool call")
             elif is_codex:
                 requested_model = str(payload.get("model", CODEX_DEFAULT_MODEL))
                 _, _, codex_response_model = _codex_model_selection(requested_model)
                 text = invoke_codex(_user_prompt(payload), requested_model)
+                tool_calls = []
             else:
                 text = invoke_harness(_user_prompt(payload))
+                tool_calls = []
         except (ValueError, json.JSONDecodeError) as exc:
             self._send(400, _error(str(exc)))
             return
@@ -388,9 +584,9 @@ class Handler(BaseHTTPRequestHandler):
             else (str(payload.get("model", "")) if is_platform else "agentcore-nova-2-lite")
         )
         if payload.get("stream") is True:
-            self._send_stream(request_id, text, response_model)
+            self._send_stream(request_id, text, response_model, tool_calls)
             return
-        self._send(200, _response(request_id, text, response_model))
+        self._send(200, _response(request_id, text, response_model, tool_calls))
 
     def log_message(self, *_args: Any) -> None:
         return

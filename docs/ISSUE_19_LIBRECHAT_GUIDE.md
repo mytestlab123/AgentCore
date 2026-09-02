@@ -40,10 +40,14 @@ Codex may emit progress messages before a tool call and a final answer. The
 adapter returns the last completed assistant message so the GUI receives the
 answer rather than progress text such as “I’ll verify…”.
 
-It accepts the latest user text, invokes one fixed Harness, and returns one
-OpenAI-compatible completion. When LibreChat requests `stream: true`, it
-returns minimal OpenAI-compatible SSE chunks and closes the stream after
-`[DONE]`. GovTechAI exposes only GPT-5.6 Luna, Azure Claude Haiku 4.5, and
+It accepts the conversation, invokes one fixed Harness, and returns one
+OpenAI-compatible completion. The protected GovTechAI route also translates
+OpenAI function tools and tool-result follow-up messages to the provider's
+Responses format, then translates provider `function_call` items back to
+OpenAI `tool_calls`. This adapter never executes tools or makes policy
+decisions; LibreChat remains the MCP and approval owner. When LibreChat
+requests `stream: true`, it returns minimal OpenAI-compatible SSE chunks and
+closes the stream after `[DONE]`. GovTechAI exposes only GPT-5.6 Luna, Azure Claude Haiku 4.5, and
 Gemini 3.5 Flash. Errors are explicit; no provider or model fallback exists.
 The experimental `Codex Subscription (EC2)` endpoint invokes the authenticated
 EC2 Codex CLI with `--sandbox read-only` and `--ephemeral`; it is not an
@@ -69,15 +73,15 @@ GovTech key only from `/etc/agentcore-issue19/platformai.env`, owned by root
 with mode `600`; it is never committed, logged, or returned to the browser.
 Keep the adapter reachable only on the private host or SSM tunnel.
 
-For this POC, set `ENDPOINTS=custom` in LibreChat's `.env` before restarting.
-This keeps the built-in OpenAI endpoint out of the selector, so a new chat
-opens on AgentCore instead of asking for an OpenAI subscription key. The
-custom endpoint key is only the local placeholder consumed by the adapter; it
-is not an AWS or OpenAI credential. After restart, refresh the browser and
-start a new chat.
+For this POC, set `ENDPOINTS=custom,agents` in LibreChat's `.env` before
+restarting. This keeps the built-in OpenAI endpoint out of the selector while
+leaving the native Agents endpoint visible. A new chat can then use AgentCore
+or open the native Agent Builder. The custom endpoint key is only the local
+placeholder consumed by the adapter; it is not an AWS or OpenAI credential.
+After restart, refresh the browser and start a new chat.
 
 ```dotenv
-ENDPOINTS=custom
+ENDPOINTS=custom,agents
 ```
 
 ```yaml

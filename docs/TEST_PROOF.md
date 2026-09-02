@@ -213,6 +213,40 @@ as soon as HTTP 200 ALLOW, HTTP 403 IAM DENY, and credential lifecycle are
 verified. Audit is shown separately as PENDING or VERIFIED. The latest browser
 run saw VERIFIED with both events.
 
+## Issue #24 dual-provider governance milestone
+
+The existing protected GovTechAI `gpt-5.6-luna` Responses provider returned a
+real `function_call` for the harmless `check_security_finding` definition.
+PR #25's adapter now preserves function tools, tool calls, and tool-result
+follow-up messages without executing a tool or making a policy decision. The
+sanitized live loopback round trip reported:
+
+```text
+LUNA_TOOL_CALL_STATUS=PASS
+TOOL_NAME=check_security_finding
+LUNA_TOOL_RESULT_STATUS=PASS
+FINAL_TEXT_PRESENT=yes
+ADAPTER_EXECUTION_STATUS=PASS
+```
+
+The same native Bedrock Nova 2 Lite probe was denied by the existing EC2 role
+because `bedrock:InvokeModel` is not allowed. No IAM, credential, or AWS
+resource mutation was performed. A visible LibreChat MCP call and native ASK
+Reject/Approve UI proof remain pending manual browser validation.
+
+### 2026-09-02 GUI mismatch diagnosis
+
+The retained agent persisted MCP tool keys with the `_mcp_` delimiter, while
+the first deployment policy listed only the documented colon-form patterns. A
+direct SDK policy probe reproduced the screenshots: the check was `ask` and
+delete was not denied. The deployment now lists both spellings and registers a
+concrete-name hook matcher. The saved agent instructions also now explicitly
+call `apply_demo_remediation` for dev requests instead of asking the model to
+describe the change and wait. After the targeted restart, the service loaded
+one MCP server and three tools; the post-fix decisions are `allow`, `ask`, and
+`deny` for check, remediation, and delete respectively. This remains
+configuration evidence until a fresh-chat GUI run captures the native cards.
+
 ## Proof boundary
 
 | Claim | Proof source | Status |

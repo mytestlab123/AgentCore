@@ -112,6 +112,88 @@ class AdapterTests(unittest.TestCase):
         self.assertIn("/platform/models/v1/responses", request.full_url)
         self.assertEqual(request.get_header("X-api-key"), "demo-key")
 
+    def test_platform_request_translates_tools_and_follow_up_result(self):
+        payload = {
+            "model": "gpt-5.6-luna",
+            "messages": [
+                {"role": "user", "content": "Check web-01."},
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "id": "call-1",
+                            "type": "function",
+                            "function": {
+                                "name": "check_security_finding",
+                                "arguments": '{"host":"web-01"}',
+                            },
+                        }
+                    ],
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "call-1",
+                    "content": "web-01 | HIGH | demo-cve-2026-0001",
+                },
+            ],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "check_security_finding",
+                        "description": "Read the synthetic finding.",
+                        "parameters": {"type": "object"},
+                    },
+                }
+            ],
+        }
+        translated = adapter._platform_request_payload(payload, "gpt-5.6-luna")
+        self.assertEqual(translated["input"][1]["type"], "function_call")
+        self.assertEqual(translated["input"][1]["call_id"], "call-1")
+        self.assertEqual(translated["input"][2]["type"], "function_call_output")
+        self.assertEqual(translated["input"][2]["output"].split(" | ")[1], "HIGH")
+        self.assertEqual(translated["tools"][0]["name"], "check_security_finding")
+        self.assertEqual(translated["reasoning"], {"effort": "low"})
+
+    def test_platform_function_call_translates_without_execution(self):
+        provider_response = {
+            "output": [
+                {"type": "reasoning", "content": []},
+                {
+                    "type": "function_call",
+                    "call_id": "call-1",
+                    "name": "check_security_finding",
+                    "arguments": '{"host":"web-01"}',
+                },
+            ]
+        }
+        calls = adapter._platform_tool_calls(provider_response)
+        self.assertEqual(
+            calls,
+            [
+                {
+                    "id": "call-1",
+                    "type": "function",
+                    "function": {
+                        "name": "check_security_finding",
+                        "arguments": '{"host":"web-01"}',
+                    },
+                }
+            ],
+        )
+        response = adapter._response("chatcmpl-test", None, "gpt-5.6-luna", calls)
+        self.assertEqual(response["choices"][0]["finish_reason"], "tool_calls")
+        self.assertIsNone(response["choices"][0]["message"]["content"])
+
+    def test_platform_tool_stream_uses_openai_chunk_shape(self):
+        events = adapter._stream_tool_events(
+            "chatcmpl-test",
+            [{"id": "call-1", "type": "function", "function": {"name": "check", "arguments": "{}"}}],
+            "gpt-5.6-luna",
+        )
+        self.assertEqual(events[0]["choices"][0]["delta"]["tool_calls"][0]["id"], "call-1")
+        self.assertEqual(events[1]["choices"][0]["finish_reason"], "tool_calls")
+
     def test_platform_uses_protected_config_when_placeholder_is_supplied(self):
         response_body = {"output": [{"content": [{"type": "output_text", "text": "ok"}]}]}
 
