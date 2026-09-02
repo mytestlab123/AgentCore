@@ -50,6 +50,11 @@ not claim that a screenshot proves a running LibreChat deployment.
 This is synthetic policy education, not production RBAC, AWS authorization, or
 a multi-user approval queue.
 
+The `apply_demo_remediation` schema marks `ticket` optional for `dev`; the
+native LibreChat approval prompt, not the model or MCP server, is the human
+confirmation boundary. `prod` remains guarded by the trusted hook and a
+`DEMO-*` ticket.
+
 ### Provider boundary
 
 For the expanded PR #25 milestone, the protected GovTechAI Luna route is
