@@ -44,3 +44,13 @@ not claim that a screenshot proves a running LibreChat deployment.
 
 This is synthetic policy education, not production RBAC, AWS authorization, or
 a multi-user approval queue.
+
+### Provider boundary
+
+For the expanded PR #25 milestone, the protected GovTechAI Luna route is
+tool-capable. The repository adapter translates OpenAI-compatible function
+tool requests and follow-up results to the provider Responses protocol and
+translates function calls back; it does not execute tools or authorize them.
+LibreChat's native MCP approval path remains responsible for ALLOW, ASK, and
+DENY. Native Bedrock Nova 2 Lite remains blocked until the existing EC2 role
+has approved `bedrock:InvokeModel`; this POC does not change that role.

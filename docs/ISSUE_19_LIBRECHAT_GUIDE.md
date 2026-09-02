@@ -40,10 +40,14 @@ Codex may emit progress messages before a tool call and a final answer. The
 adapter returns the last completed assistant message so the GUI receives the
 answer rather than progress text such as “I’ll verify…”.
 
-It accepts the latest user text, invokes one fixed Harness, and returns one
-OpenAI-compatible completion. When LibreChat requests `stream: true`, it
-returns minimal OpenAI-compatible SSE chunks and closes the stream after
-`[DONE]`. GovTechAI exposes only GPT-5.6 Luna, Azure Claude Haiku 4.5, and
+It accepts the conversation, invokes one fixed Harness, and returns one
+OpenAI-compatible completion. The protected GovTechAI route also translates
+OpenAI function tools and tool-result follow-up messages to the provider's
+Responses format, then translates provider `function_call` items back to
+OpenAI `tool_calls`. This adapter never executes tools or makes policy
+decisions; LibreChat remains the MCP and approval owner. When LibreChat
+requests `stream: true`, it returns minimal OpenAI-compatible SSE chunks and
+closes the stream after `[DONE]`. GovTechAI exposes only GPT-5.6 Luna, Azure Claude Haiku 4.5, and
 Gemini 3.5 Flash. Errors are explicit; no provider or model fallback exists.
 The experimental `Codex Subscription (EC2)` endpoint invokes the authenticated
 EC2 Codex CLI with `--sandbox read-only` and `--ephemeral`; it is not an
