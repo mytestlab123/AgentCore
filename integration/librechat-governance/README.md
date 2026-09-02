@@ -9,9 +9,13 @@ and one harmless local state file. It never calls AWS.
 
 1. Copy `librechat.yaml.example` into the LibreChat configuration.
 2. Replace both `/absolute/path/to/...` placeholders.
-3. Ensure the state directory is private (`700`) and restart LibreChat so the
+3. Set `ENDPOINTS=custom,agents` in LibreChat's `.env` when custom endpoints
+   are also configured; `agents` must be listed or the native Agents endpoint
+   is hidden from the endpoint selector.
+4. Ensure the state directory is private (`700`) and restart LibreChat so the
    MCP server and trusted hook load.
-4. Create an Agent with the `agentcore_governance` MCP server selected.
+5. Select `Agents`, open the native Agent Builder, and create an Agent with the
+   `agentcore_governance` MCP server selected.
 
 ## Five-minute flow
 

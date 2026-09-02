@@ -69,15 +69,15 @@ GovTech key only from `/etc/agentcore-issue19/platformai.env`, owned by root
 with mode `600`; it is never committed, logged, or returned to the browser.
 Keep the adapter reachable only on the private host or SSM tunnel.
 
-For this POC, set `ENDPOINTS=custom` in LibreChat's `.env` before restarting.
-This keeps the built-in OpenAI endpoint out of the selector, so a new chat
-opens on AgentCore instead of asking for an OpenAI subscription key. The
-custom endpoint key is only the local placeholder consumed by the adapter; it
-is not an AWS or OpenAI credential. After restart, refresh the browser and
-start a new chat.
+For this POC, set `ENDPOINTS=custom,agents` in LibreChat's `.env` before
+restarting. This keeps the built-in OpenAI endpoint out of the selector while
+leaving the native Agents endpoint visible. A new chat can then use AgentCore
+or open the native Agent Builder. The custom endpoint key is only the local
+placeholder consumed by the adapter; it is not an AWS or OpenAI credential.
+After restart, refresh the browser and start a new chat.
 
 ```dotenv
-ENDPOINTS=custom
+ENDPOINTS=custom,agents
 ```
 
 ```yaml
