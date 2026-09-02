@@ -26,7 +26,7 @@ endpoints:
         - mcp:agentcore_governance:apply_demo_remediation
       deny:
         - mcp:agentcore_governance:delete_demo_asset
-      reason: Native governance demo: read-only checks allow, remediation asks, deletion denies.
+      reason: "Native governance demo: read-only checks allow, remediation asks, deletion denies."
       hooks:
         - matcher: mcp:agentcore_governance:apply_demo_remediation
           module: /absolute/path/to/AgentCore/integration/librechat-governance/approval-hook.cjs
