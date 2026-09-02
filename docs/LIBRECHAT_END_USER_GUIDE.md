@@ -69,8 +69,11 @@ You are the AgentCore governance demo assistant.
 
 Use only the agentcore_governance MCP tools for this demonstration.
 For a security check, report the returned finding and do not invent AWS data.
-For remediation, describe the proposed harmless demo change and wait for the
-native LibreChat approval prompt.
+For a dev remediation, call `apply_demo_remediation` with the requested host
+and `environment=dev`; do not ask for a ticket or confirmation. Let LibreChat's
+native approval prompt handle the human decision.
+For prod remediation, include a `DEMO-*` ticket only when the user supplies
+one; otherwise do not call the tool.
 Never delete assets.
 Keep responses short and label the policy result as ALLOW, ASK, or DENY.
 ```
@@ -106,15 +109,19 @@ This only confirms that the agent chat is responding. It does **not** prove
 that an MCP tool ran. Use the exact proof prompts in the next section to test
 the governance policy and tool wiring.
 
-### Current live-provider limitation
+### Current live-provider note
 
-The current AgentCore, Codex Subscription, and GovTechAI entries are custom
-text-only adapters. They accept the chat text but do not implement the
-OpenAI-compatible `tools` / `tool_calls` exchange required for a model to call
-MCP tools. Therefore a live chat may answer conversationally instead of
-opening the native approval prompt. The native MCP policy and tool behavior are
-covered by the offline proof until a separate tool-capable provider or adapter
-is approved. Do not present a text-only response as live ALLOW/ASK/DENY proof.
+The protected GovTechAI `gpt-5.6-luna` adapter now preserves the
+OpenAI-compatible `tools`, `tool_calls`, and tool-result follow-up protocol; it
+does not execute tools or make policy decisions. Select the GovTechAI Luna
+provider for the live tool proof. Native Bedrock Nova 2 Lite remains blocked on
+the retained host because its existing role lacks `bedrock:InvokeModel`.
+Do not present a text-only response as live ALLOW/ASK/DENY proof.
+
+If an existing agent pauses the read-only check, the saved agent may predate the
+current policy spelling. Refresh the deployment and use a fresh chat after the
+configuration restart. The concrete `_mcp_` tool names are included in the
+policy alongside the documented `mcp:server:tool` names for this reason.
 
 ## 4. Run the five-minute proof
 
@@ -138,6 +145,15 @@ If this exact prompt returns only a generic readiness message, return to the
 Agent Builder and verify that the `agentcore_governance` MCP server and its
 three tools are enabled before testing again.
 
+If LibreChat shows an approval card for this read-only check, refresh the
+deployment, start a fresh chat, and confirm the agent has the current policy.
+The check rule must allow both:
+
+```text
+mcp:agentcore_governance:check_security_finding
+check_security_finding_mcp_agentcore_governance
+```
+
 ### ASK / Reject: remediation refused
 
 Prompt:
@@ -149,6 +165,8 @@ Apply the remediation for web-01 in dev.
 Expected behavior:
 
 - LibreChat shows its native approval prompt.
+- The model emits `apply_demo_remediation`; it does not ask for a ticket in
+  `dev`.
 - Choose **Reject**.
 - The MCP server is not called.
 - The result is `ASK / Reject`.

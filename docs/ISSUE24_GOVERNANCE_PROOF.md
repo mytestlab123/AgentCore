@@ -20,6 +20,9 @@ stdio-only. It never calls AWS and never contains credentials.
 The static policy and hook are in
 `integration/librechat-governance/librechat.yaml.example` and
 `integration/librechat-governance/approval-hook.cjs`.
+The policy carries both the documented `mcp:server:tool` spelling and
+LibreChat's persisted `tool_mcp_server` spelling. This is required for agents
+whose saved tool list uses the latter form.
 
 ## Dual-provider live preflight
 
@@ -44,6 +47,44 @@ ADAPTER_EXECUTION_STATUS=PASS
 This proves Luna provider tool-call and tool-result protocol compatibility,
 not LibreChat's visible approval UI. The adapter deployment retained the
 existing loopback listener and made no AWS resource or IAM change.
+
+## GUI mismatch diagnosis (2 September 2026)
+
+The first manual screenshots were not evidence of a model or AWS failure. The
+retained agent stored these concrete MCP keys:
+
+```text
+check_security_finding_mcp_agentcore_governance
+apply_demo_remediation_mcp_agentcore_governance
+delete_demo_asset_mcp_agentcore_governance
+```
+
+The running YAML initially listed only the colon-form patterns. A direct
+LibreChat SDK policy probe reproduced the observed behavior: the read-only
+check fell through to `ask`, remediation fell through to `ask`, and deletion
+also fell through to `ask` instead of `deny`. The deployment was corrected to
+include both spellings, and a second hook matcher was added for the concrete
+remediation key. A fresh service start loaded both hook registrations and all
+three MCP tools.
+
+The saved agent instructions also asked the model to describe remediation and
+wait. They were updated so the model must emit `apply_demo_remediation` for a
+dev request and let native LibreChat approval handle the human decision. A
+backup of the prior instructions remains on the private host; no secret was
+changed.
+
+The policy decision probe after the correction returned:
+
+```text
+check_security_finding_mcp_agentcore_governance => allow
+apply_demo_remediation_mcp_agentcore_governance => ask
+delete_demo_asset_mcp_agentcore_governance => deny
+```
+
+This is configuration/provider evidence, not a substitute for the requested
+fresh-chat GUI proof. Start a new conversation after a restart; the configured
+`memory` checkpointer is process-local, so an old paused conversation must not
+be reused as a live acceptance run.
 
 Native Bedrock Nova 2 Lite was also probed with the same tool schema using the
 EC2 default role chain. AWS returned an identity-policy `AccessDenied` for
@@ -91,8 +132,9 @@ The repository-wide check also runs this test:
   existing EC2 role because `bedrock:InvokeModel` is denied by identity policy.
 - **READ-ONLY PROVEN:** the synthetic check has no mutation and the test makes
   no network or AWS call.
-- **PLANNED:** run the same config in a disposable LibreChat instance and
-  capture the native approval UI/checkpoint interaction.
+- **PLANNED:** capture the corrected native LibreChat approval UI/checkpoint
+  interaction in a fresh chat for check, remediation Reject, remediation
+  Approve, delete, and context-policy prompts.
 - **NOT PROVEN:** a visible LibreChat MCP tool call and native ASK Reject /
   Approve screenshots in this run; real AWS/Inspector authorization;
   production RBAC; multi-user approval; ticketing; or durable production

@@ -22,13 +22,20 @@ endpoints:
       mode: default
       allow:
         - mcp:agentcore_governance:check_security_finding
+        # LibreChat persists MCP keys with the `_mcp_` delimiter. Keep the
+        # concrete spelling as well so existing agents receive the same rule.
+        - check_security_finding_mcp_agentcore_governance
       ask:
         - mcp:agentcore_governance:apply_demo_remediation
+        - apply_demo_remediation_mcp_agentcore_governance
       deny:
         - mcp:agentcore_governance:delete_demo_asset
+        - delete_demo_asset_mcp_agentcore_governance
       reason: "Native governance demo: read-only checks allow, remediation asks, deletion denies."
       hooks:
         - matcher: mcp:agentcore_governance:apply_demo_remediation
+          module: /absolute/path/to/AgentCore/integration/librechat-governance/approval-hook.cjs
+        - matcher: apply_demo_remediation_mcp_agentcore_governance
           module: /absolute/path/to/AgentCore/integration/librechat-governance/approval-hook.cjs
     checkpointer:
       type: memory

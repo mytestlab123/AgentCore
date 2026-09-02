@@ -234,6 +234,19 @@ because `bedrock:InvokeModel` is not allowed. No IAM, credential, or AWS
 resource mutation was performed. A visible LibreChat MCP call and native ASK
 Reject/Approve UI proof remain pending manual browser validation.
 
+### 2026-09-02 GUI mismatch diagnosis
+
+The retained agent persisted MCP tool keys with the `_mcp_` delimiter, while
+the first deployment policy listed only the documented colon-form patterns. A
+direct SDK policy probe reproduced the screenshots: the check was `ask` and
+delete was not denied. The deployment now lists both spellings and registers a
+concrete-name hook matcher. The saved agent instructions also now explicitly
+call `apply_demo_remediation` for dev requests instead of asking the model to
+describe the change and wait. After the targeted restart, the service loaded
+one MCP server and three tools; the post-fix decisions are `allow`, `ask`, and
+`deny` for check, remediation, and delete respectively. This remains
+configuration evidence until a fresh-chat GUI run captures the native cards.
+
 ## Proof boundary
 
 | Claim | Proof source | Status |

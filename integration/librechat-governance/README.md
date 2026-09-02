@@ -17,6 +17,11 @@ and one harmless local state file. It never calls AWS.
 5. Select `Agents`, open the native Agent Builder, and create an Agent with the
    `agentcore_governance` MCP server selected.
 
+The example policy includes both the documented `mcp:server:tool` patterns and
+the concrete `tool_mcp_server` keys LibreChat persists for existing agents.
+Keep both forms when upgrading a retained deployment so allow/ask/deny rules
+do not fall through on older saved agents.
+
 ## Five-minute flow
 
 1. Ask `Check the security finding for web-01.` The check tool is **ALLOW**.
