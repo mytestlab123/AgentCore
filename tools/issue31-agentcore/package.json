@@ -1,0 +1,9 @@
+{
+  "name": "agentcore-issue31-toolchain",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Pinned native AgentCore CLI for Issue 31",
+  "dependencies": {
+    "@aws/agentcore": "0.28.1"
+  }
+}

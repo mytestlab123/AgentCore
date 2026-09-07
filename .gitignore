@@ -32,3 +32,12 @@ coverage/
 .vscode/
 *.swp
 *~
+
+# Issue 31 private AgentCore CLI deployment material
+/.issue31-agentcore-private/
+/agentcore/aws-targets.json
+/agentcore/.cli/
+/agentcore/cdk/
+/agentcore/cdk.out/
+/agentcore/.env.local
+/agentcore/.env.*

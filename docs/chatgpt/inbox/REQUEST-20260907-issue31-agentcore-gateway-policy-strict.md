@@ -5,10 +5,38 @@ https://github.com/mytestlab123/AgentCore/issues/31
 
 ## Status
 
-**PLANNING ONLY / HOLD ACTIVE.**
+**HOLD LIFTED by Amit on 2026-09-07.**
 
-This contract authorizes no AWS mutation and contains no feature implementation.
-Codex must not start implementation until Amit/ChatGPT explicitly lifts the hold in the linked Draft PR.
+Approved live boundary: `AWS_PROFILE=amit` and
+`AWS_REGION=ap-southeast-1`.
+
+Lifecycle amendment approved by Amit on 2026-09-08 supersedes every older
+mandatory-cleanup or deletion-TTL statement in this contract: retain the
+dedicated low-cost Issue #31 resources when projected combined cost is below
+US$2/month. Do not auto-delete them on success, failure, or interruption.
+Tag a review date instead of an automatic cleanup TTL. Cleanup requires a new,
+explicit instruction for this exact stack. Material hourly/day resources such
+as EC2 or NAT Gateway remain cleanup-first, but are not part of this milestone.
+
+Native CLI amendment approved by Amit on 2026-09-08: use pinned official
+AgentCore CLI `0.28.1` for Gateway, target, Policy Engine, and policy deployment.
+Creating and retaining the account/Region `CDKToolkit` bootstrap stack is
+explicitly authorized. The stack remains subject to the US$2/month cost gate.
+Harness, Runtime, and model deployment remain prohibited.
+
+### Practical implementation amendment
+
+Amit approved the following correction after the mandatory preflight exposed
+the original budget and endpoint mismatch:
+
+- aim for roughly five changed files and 500 non-generated changed lines as a
+  review target, but do not omit safety, lifecycle controls, tests, or durable evidence to
+  force that estimate;
+- the AWS-managed Gateway URL is permitted only with `AWS_IAM` authentication;
+- expected account and caller SHA-256 environment gates are mandatory;
+- bounded AWS/Lambda invocation metrics may prove backend execution count;
+- the original no-public-endpoint rule means no unauthenticated or separately
+  created public endpoint; it does not prohibit the IAM-protected managed URL.
 
 ## One question
 
@@ -56,8 +84,8 @@ exact profile + Region preflight
 -> call check_demo_scope(environment=prod)
 -> prove DENY and backend call delta = 0
 -> capture sanitized evidence
--> delete all dedicated resources
--> independently verify absence
+-> retain the tagged low-cost stack for repeatable demos
+-> independently verify retained inventory and projected monthly cost
 ```
 
 ## Expected final result
@@ -76,10 +104,13 @@ DEV_DECISION=ALLOW
 DEV_BACKEND_CALLS=1
 PROD_DECISION=DENY
 PROD_BACKEND_DELTA=0
-CLEANUP=PASS
+RESOURCE_RETENTION=PASS
+ESTIMATED_MONTHLY_IDLE_COST_USD=<value below 2.00>
 ```
 
-If the policy engine, Gateway, IAM, Region, target schema, service availability, or cleanup differs from the reviewed contract, the result is BLOCKED. Do not substitute another architecture.
+If the policy engine, Gateway, IAM, Region, target schema, service availability,
+ownership, retention inventory, or cost differs from the reviewed contract,
+the result is BLOCKED. Do not substitute another architecture.
 
 ## Frozen AWS boundary
 
@@ -143,7 +174,8 @@ dev_decision=ALLOW
 dev_backend_calls=1
 prod_decision=DENY
 prod_backend_delta=0
-cleanup=PASS
+resource_retention=PASS
+estimated_monthly_idle_cost_usd=<value below 2.00>
 ```
 
 Do not commit:
@@ -195,11 +227,14 @@ Live work is limited to:
 - one AgentCore policy engine/policy or the minimum current AWS equivalent;
 - exactly one allowed and one denied test call;
 - minimal native logging/evidence reads;
-- cleanup.
+- retained-resource inventory and cost verification.
 
 Do not enable CloudWatch Transaction Search, account-wide observability, VPC resources, public networking, databases, or another managed service just for evidence.
 
-Prewrite cleanup before create. Cleanup must run on success and failure. PASS is impossible until every dedicated resource is independently verified absent.
+Prewrite exact cleanup commands before create for future owner-directed use,
+but do not execute them automatically. PASS requires every retained resource to
+be independently inventoried, tagged, unambiguously owned, and projected below
+US$2/month.
 
 ## Credential guardrails
 
@@ -208,11 +243,12 @@ Prewrite cleanup before create. Cleanup must run on success and failure. PASS is
 - do not copy local credentials to EC2, LibreChat, containers, or another host;
 - do not print credentials or environment secrets;
 - do not place identifiers or credentials in argv, Git, Issues, PR text, screenshots, or logs;
-- use temporary service roles only where the POC itself requires them, with least privilege and explicit cleanup.
+- use dedicated service roles only where the POC itself requires them, with
+  least privilege and explicit ownership tags.
 
 ## Expected implementation files
 
-Maximum three product files:
+Expected compact implementation:
 
 1. `scripts/gateway_policy_poc.py`
    - plan/preflight/live lifecycle;
@@ -220,7 +256,7 @@ Maximum three product files:
    - invoke the two structured calls;
    - calculate backend execution delta;
    - sanitize result;
-   - cleanup/final verification.
+   - retained-resource inventory and final cost verification.
 
 2. `scripts/test_gateway_policy_poc.py`
    - offline tests only;
@@ -232,11 +268,13 @@ Maximum three product files:
 Target:
 
 ```text
-<= 3 product files
-<= 200 non-generated changed lines total
+approximately 5 changed files
+approximately 500 non-generated changed lines total
 ```
 
-If current AgentCore APIs make this budget unrealistic, Codex must post BLOCKER before exceeding it.
+This is a review target, not a hard limit or safety gate. Explain material
+growth in the PR, and never remove safety, lifecycle controls, validation, or evidence only
+to fit the estimate.
 
 The script may generate a tiny Lambda handler and ZIP in a private temporary directory at runtime instead of adding a fourth product file.
 
@@ -251,7 +289,8 @@ The focused test must prove at minimum:
 - only `dev` and `prod` are accepted test inputs;
 - expected ALLOW/DENY result parsing is fail-closed;
 - backend delta calculation treats any `prod` increment as failure;
-- cleanup failure prevents PASS;
+- ambiguous ownership, duplicate resources, or cost above the threshold
+  prevents PASS;
 - sanitization excludes account IDs/ARNs/private identifiers.
 
 Required validation before review:
@@ -278,7 +317,8 @@ After HOLD is lifted but before creating anything, Codex must privately verify:
 7. the minimum temporary IAM permissions are understood before creation;
 8. the Gateway target type needed for one Lambda tool is currently supported;
 9. policy can inspect the structured `environment` argument in the current service contract;
-10. cleanup commands/API calls are known before mutation.
+10. future cleanup commands/API calls are known before mutation, while the
+    approved default for this stack remains retention.
 
 Do not make a billable model invocation as part of this preflight.
 
@@ -294,9 +334,10 @@ Stop without substituting architecture if any of these occurs:
 - success would require broad IAM, AdministratorAccess, or PowerUserAccess;
 - evidence would require enabling an account-wide logging/observability feature;
 - denied call cannot be independently proven to have zero backend execution;
-- code exceeds the approved budget without review;
+- code grows materially beyond the review target without explanation;
 - secret/private identifiers would need to enter Git;
-- any dedicated resource cannot be deleted and independently verified absent.
+- retained resources cannot be independently identified, tagged, or kept below
+  the US$2/month threshold.
 
 BLOCKER format:
 
@@ -375,7 +416,7 @@ Before ChatGPT review, Codex must post one concise PR comment containing:
 - `PROD_DECISION` and `PROD_BACKEND_DELTA`;
 - focused test result;
 - `./scripts/check.sh` result;
-- cleanup verification;
+- retained-resource inventory and monthly cost estimate;
 - statement that no model, LibreChat, workload data, credential copy, public endpoint, or unrelated AWS service was added;
 - sanitized private-evidence location only, never its sensitive contents.
 

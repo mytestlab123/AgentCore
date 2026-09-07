@@ -1,0 +1,73 @@
+{
+  "$schema": "https://schema.agentcore.aws.dev/v1/agentcore.json",
+  "name": "Issue31Policy",
+  "version": 1,
+  "managedBy": "CDK",
+  "tags": {
+    "agentcore:created-by": "agentcore-cli",
+    "agentcore:project-name": "Issue31Policy",
+    "owner": "amit",
+    "dev": "amit",
+    "created": "2026-09-08",
+    "tools": "cdx",
+    "environment": "dev",
+    "version": "v1",
+    "TTL": "08-10-26",
+    "phase": "poc",
+    "project": "AgentCore",
+    "purpose": "issue31-policy-proof",
+    "retention": "retain-under-usd2-month",
+    "review-after": "2026-10-08"
+  },
+  "runtimes": [],
+  "memories": [],
+  "knowledgeBases": [],
+  "credentials": [],
+  "evaluators": [],
+  "onlineEvalConfigs": [],
+  "agentCoreGateways": [
+    {
+      "name": "Issue31Gateway",
+      "protocolType": "MCP",
+      "description": "Issue 31 deterministic Gateway Policy proof",
+      "targets": [
+        {
+          "name": "Issue31Target",
+          "targetType": "lambdaFunctionArn",
+          "lambdaFunctionArn": {
+            "lambdaArn": "__PRIVATE_LAMBDA_ARN__",
+            "toolSchemaFile": "__PRIVATE_TOOL_SCHEMA_PATH__"
+          }
+        }
+      ],
+      "authorizerType": "AWS_IAM",
+      "enableSemanticSearch": false,
+      "exceptionLevel": "NONE",
+      "policyEngineConfiguration": {
+        "policyEngineName": "Issue31PolicyEngine",
+        "mode": "ENFORCE"
+      }
+    }
+  ],
+  "policyEngines": [
+    {
+      "name": "Issue31PolicyEngine",
+      "description": "Permit the synthetic dev scope and deny prod by default",
+      "policies": [
+        {
+          "name": "Issue31DevPermit",
+          "description": "Permit only the approved caller and dev tool input",
+          "statement": "__PRIVATE_CEDAR_STATEMENT__",
+          "validationMode": "FAIL_ON_ANY_FINDINGS",
+          "enforcementMode": "ACTIVE",
+          "authorizationPhase": "INITIATE"
+        }
+      ]
+    }
+  ],
+  "configBundles": [],
+  "abTests": [],
+  "harnesses": [],
+  "datasets": [],
+  "payments": []
+}
