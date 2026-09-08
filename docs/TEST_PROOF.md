@@ -2,6 +2,32 @@
 
 Last verified: 1 September 2026, 00:09 SGT
 
+## Issue #34 Gateway proof-integrity validation
+
+Last verified: 8 September 2026, 09:46 SGT
+
+The model-free Gateway Policy verifier passed its 16 focused offline tests and
+the complete `./scripts/check.sh` suite. A retained live proof also returned
+dev `ALLOW` with backend delta one and prod `DENY` with backend delta zero.
+
+The bounded browser command was also run against the retained loopback server:
+
+```text
+APP_URL=http://127.0.0.1:3333 ./scripts/browser-e2e.sh
+```
+
+Result: **BASELINE MISMATCH (not an Issue #34 regression)**. The server renders
+the newer Issue #15 model-comparison Playground, while the browser helper still
+asserts the older Issue #9/local-simulation Playground copy and routes. It
+stopped at `Playground content was not visible`, saved a failure screenshot,
+and verified that Chrome stopped, its temporary profile was removed, and the
+debug port was released. Issue #34 changes no frontend or model behavior and
+therefore does not reinterpret this run as a browser PASS.
+
+Private evidence:
+
+`/home/user/.AGENTS-temp/AgentCore/browser-e2e/20260908T094542+0800/`
+
 ## Issue #15 two-provider comparison
 
 Last verified: 1 September 2026, 18:51 SGT

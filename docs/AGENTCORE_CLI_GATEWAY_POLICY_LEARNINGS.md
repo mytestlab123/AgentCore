@@ -54,6 +54,14 @@ AWS account IDs, ARNs, endpoint URLs, credentials, or raw deployment output.
   DENY with Lambda delta exactly zero.
 - Lambda metrics are backend-execution evidence; a policy response alone does
   not prove the backend was untouched.
+- Compare the live Cedar statement with the exact expected statement. Substring
+  checks cannot exclude an added permit or changed principal/resource binding.
+- Verify the live Gateway-to-Policy-Engine ARN/mode and target-to-Lambda ARN;
+  deployed-state names alone do not prove those links.
+- Compare CloudFormation resource-type counts, not sets, so a duplicate of an
+  otherwise expected type fails closed.
+- Measure retained bootstrap S3/ECR and Lambda-log bytes and include them in
+  the cost calculation; resource presence alone is not storage-cost evidence.
 - Parse the complete MCP JSON-RPC envelope. An authentication error, a generic
   error containing the word "denied", or a successful result mentioning that
   word is not Gateway Policy DENY evidence.

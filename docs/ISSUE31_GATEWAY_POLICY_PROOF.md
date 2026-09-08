@@ -122,3 +122,30 @@ AGENTCORE_EXPECTED_ACCOUNT_SHA256=<approved-hash> \
 AGENTCORE_EXPECTED_CALLER_SHA256=<approved-hash> \
 python3 scripts/gateway_policy_poc.py --prove-live
 ```
+
+## Issue #34 integrity follow-up
+
+The stacked Issue #34 verifier hardening repeated the retained live proof on
+2026-09-08 from 09:36 through 09:39 SGT and reached the same PASS result.
+
+The stronger verifier additionally proved:
+
+- the native CLI deployment environment removes ambient static, web-identity,
+  container, and role credential overrides before selecting profile `amit`;
+- the live Cedar statement exactly equals the permit derived from the approved
+  caller, Gateway ARN, tool action, and `environment == "dev"` condition;
+- the Gateway is linked to the exact Policy Engine in `ENFORCE` mode and the
+  target is linked to the exact retained Lambda;
+- the application stack has exactly one Gateway, target, policy, Policy Engine,
+  CDK metadata object, IAM policy, and IAM role;
+- the bootstrap stack has exactly one S3 bucket, ECR repository, KMS key/alias,
+  S3 policy, SSM parameter, two IAM policies, and five IAM roles;
+- retained storage measured 65,884 S3 bytes, zero ECR image bytes, and 849 log
+  bytes; together with one KMS key and the conservative small-use buffer, the
+  calculated monthly estimate was US$1.0100023152, displayed as US$1.01;
+- seven timestamped metric samples contained only zero and one, with dev delta
+  one and prod delta zero.
+
+The follow-up focused suite contains 16 offline regression tests covering the
+new identity-environment, exact-linkage, exact-policy, duplicate-topology, and
+measured-cost gates. Exact identifiers and raw evidence remain private.

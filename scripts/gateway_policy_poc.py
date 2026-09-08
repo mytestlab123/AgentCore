@@ -13,6 +13,7 @@ import subprocess
 import sys
 import time
 import zipfile
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import unquote, urlparse
@@ -30,6 +31,9 @@ CLI_BIN = Path(__file__).parents[1] / "tools/issue31-agentcore/node_modules/.bin
 COST_LIMIT = 2.00
 KMS_KEY_MONTHLY_USD = 1.00
 OTHER_IDLE_BUFFER_USD = 0.01
+S3_GB_MONTH_USD = 0.03
+ECR_GB_MONTH_USD = 0.12
+LOGS_GB_MONTH_USD = 0.60
 FUNCTION_NAME = "agentcore-issue31-backend"
 ROLE_NAME = "agentcore-issue31-lambda"
 STACK_NAME = "AgentCore-Issue31Policy-default"
@@ -37,16 +41,25 @@ GATEWAY_NAME = "Issue31Gateway"
 TARGET_NAME = "Issue31Target"
 ENGINE_NAME = "Issue31PolicyEngine"
 POLICY_NAME = "Issue31DevPermit"
-EXPECTED_APP_TYPES = {
-    "AWS::BedrockAgentCore::Gateway", "AWS::BedrockAgentCore::GatewayTarget",
-    "AWS::BedrockAgentCore::Policy", "AWS::BedrockAgentCore::PolicyEngine",
-    "AWS::CDK::Metadata", "AWS::IAM::Policy", "AWS::IAM::Role",
-}
-EXPECTED_BOOTSTRAP_TYPES = {
-    "AWS::ECR::Repository", "AWS::IAM::Policy", "AWS::IAM::Role",
-    "AWS::KMS::Alias", "AWS::KMS::Key", "AWS::S3::Bucket",
-    "AWS::S3::BucketPolicy", "AWS::SSM::Parameter",
-}
+EXPECTED_APP_COUNTS = Counter({
+    "AWS::BedrockAgentCore::Gateway": 1,
+    "AWS::BedrockAgentCore::GatewayTarget": 1,
+    "AWS::BedrockAgentCore::Policy": 1,
+    "AWS::BedrockAgentCore::PolicyEngine": 1,
+    "AWS::CDK::Metadata": 1,
+    "AWS::IAM::Policy": 1,
+    "AWS::IAM::Role": 1,
+})
+EXPECTED_BOOTSTRAP_COUNTS = Counter({
+    "AWS::ECR::Repository": 1,
+    "AWS::IAM::Policy": 2,
+    "AWS::IAM::Role": 5,
+    "AWS::KMS::Alias": 1,
+    "AWS::KMS::Key": 1,
+    "AWS::S3::Bucket": 1,
+    "AWS::S3::BucketPolicy": 1,
+    "AWS::SSM::Parameter": 1,
+})
 TAGS = {
     "Name": "agentcore-issue31-policy-proof", "dev": "amit",
     "project": "AgentCore", "created": "2026-09-08", "tools": "cdx",
@@ -62,6 +75,18 @@ class Blocked(RuntimeError):
 
 def digest(value):
     return hashlib.sha256(value.encode()).hexdigest()
+
+
+def scoped_aws_env(source=None):
+    env = dict(os.environ if source is None else source)
+    for name in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN",
+                 "AWS_SECURITY_TOKEN", "AWS_WEB_IDENTITY_TOKEN_FILE", "AWS_ROLE_ARN",
+                 "AWS_ROLE_SESSION_NAME", "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+                 "AWS_CONTAINER_CREDENTIALS_FULL_URI"):
+        env.pop(name, None)
+    env.update({"AWS_PROFILE": PROFILE, "AWS_REGION": REGION,
+                "AWS_DEFAULT_REGION": REGION, "AWS_PAGER": ""})
+    return env
 
 
 def sanitize(value):
@@ -167,6 +192,14 @@ def cedar_principal(caller_arn):
     return match.group(1) if match else caller_arn
 
 
+def cedar_statement(caller_arn, gateway_arn):
+    caller = cedar_principal(caller_arn)
+    return (f'permit(principal == AgentCore::IamEntity::"{caller}", '
+            f'action == AgentCore::Action::"{FULL_TOOL_NAME}", '
+            f'resource == AgentCore::Gateway::"{gateway_arn}") '
+            'when { context.input.environment == "dev" };')
+
+
 def validate_case(tool_name, environment):
     if tool_name != TOOL_NAME:
         raise Blocked("unexpected tool name")
@@ -235,12 +268,7 @@ def validate_cost(value):
 class Aws:
     def __init__(self, private_dir):
         self.private_dir = Path(private_dir)
-        self.env = os.environ.copy()
-        for name in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN",
-                     "AWS_SECURITY_TOKEN", "AWS_WEB_IDENTITY_TOKEN_FILE", "AWS_ROLE_ARN"):
-            self.env.pop(name, None)
-        self.env.update({"AWS_PROFILE": PROFILE, "AWS_REGION": REGION,
-                         "AWS_DEFAULT_REGION": REGION, "AWS_PAGER": ""})
+        self.env = scoped_aws_env()
 
     def call(self, service, operation, payload=None):
         command = ["aws", "--profile", PROFILE, "--region", REGION, service, operation,
@@ -459,12 +487,8 @@ def render_private_project(private_dir, lambda_arn, identity, gateway_arn=None,
     if include_policy:
         if not gateway_arn:
             raise Blocked("Gateway ARN is required to render the Cedar policy")
-        caller = cedar_principal(identity["Arn"])
-        data["policyEngines"][0]["policies"][0]["statement"] = (
-            f'permit(principal == AgentCore::IamEntity::"{caller}", '
-            f'action == AgentCore::Action::"{FULL_TOOL_NAME}", '
-            f'resource == AgentCore::Gateway::"{gateway_arn}") '
-            'when { context.input.environment == "dev" };')
+        data["policyEngines"][0]["policies"][0]["statement"] = cedar_statement(
+            identity["Arn"], gateway_arn)
     else:
         data["policyEngines"][0]["policies"] = []
     write_private_json(project / "agentcore.json", data)
@@ -504,10 +528,7 @@ def deploy_native_resources(project, dry_run=False, phase="converge"):
     command = [str(CLI_BIN), "deploy", "--yes"]
     if dry_run:
         command.append("--dry-run")
-    env = os.environ.copy()
-    env.update({"AWS_PROFILE": PROFILE, "AWS_REGION": REGION,
-                "AWS_DEFAULT_REGION": REGION, "AWS_PAGER": ""})
-    result = subprocess.run(command, cwd=Path(project).parent, env=env, text=True,
+    result = subprocess.run(command, cwd=Path(project).parent, env=scoped_aws_env(), text=True,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=1800)
     suffix = "dry-run" if dry_run else phase
     write_private_text(Path(project).parents[1] / f"deploy-{suffix}.log",
@@ -679,7 +700,87 @@ def stack_resources(aws, stack_name):
     return stacks[0], items.get("StackResources", [])
 
 
-def inventory_and_cost(aws, project, lambda_arn):
+def assert_resource_counts(items, expected, label):
+    actual = Counter(item.get("ResourceType") for item in items)
+    if actual != expected:
+        raise Blocked(f"{label} resource counts differ from the reviewed topology")
+    return actual
+
+
+def one_physical_id(items, resource_type):
+    matches = [item.get("PhysicalResourceId") for item in items
+               if item.get("ResourceType") == resource_type]
+    if len(matches) != 1 or not matches[0]:
+        raise Blocked(f"retained {resource_type} inventory is ambiguous")
+    return matches[0]
+
+
+def retained_storage_bytes(aws, bootstrap_items, log_group):
+    bucket = one_physical_id(bootstrap_items, "AWS::S3::Bucket")
+    repository = one_physical_id(bootstrap_items, "AWS::ECR::Repository")
+    s3_bytes = 0
+    token = None
+    while True:
+        payload = {"Bucket": bucket}
+        if token:
+            payload["ContinuationToken"] = token
+        page = aws.call("s3api", "list-objects-v2", payload)
+        s3_bytes += sum(item.get("Size", 0) for item in page.get("Contents", []))
+        token = page.get("NextContinuationToken") if page.get("IsTruncated") else None
+        if not token:
+            break
+    ecr_bytes = 0
+    token = None
+    while True:
+        payload = {"repositoryName": repository}
+        if token:
+            payload["nextToken"] = token
+        page = aws.call("ecr", "describe-images", payload)
+        ecr_bytes += sum(item.get("imageSizeInBytes", 0) for item in page.get("imageDetails", []))
+        token = page.get("nextToken")
+        if not token:
+            break
+    return {"s3_bytes": s3_bytes, "ecr_bytes": ecr_bytes,
+            "log_bytes": int(log_group.get("storedBytes", 0))}
+
+
+def retained_cost(kms_count, storage):
+    gib = 1024 ** 3
+    return validate_cost(
+        kms_count * KMS_KEY_MONTHLY_USD
+        + storage["s3_bytes"] / gib * S3_GB_MONTH_USD
+        + storage["ecr_bytes"] / gib * ECR_GB_MONTH_USD
+        + storage["log_bytes"] / gib * LOGS_GB_MONTH_USD
+        + OTHER_IDLE_BUFFER_USD)
+
+
+def validate_live_links(gateway, target, engine, policy, gateway_state,
+                        lambda_arn, identity):
+    if (gateway.get("status") != "READY" or gateway.get("authorizerType") != "AWS_IAM"
+            or gateway.get("protocolType") != "MCP"):
+        raise Blocked("live Gateway configuration is not READY/AWS_IAM/MCP")
+    validate_gateway_url(gateway.get("gatewayUrl", ""))
+    policy_configuration = gateway.get("policyEngineConfiguration", {})
+    if (policy_configuration.get("arn") != engine["policyEngineArn"]
+            or policy_configuration.get("mode") != "ENFORCE"):
+        raise Blocked("live Gateway is not linked to the expected ENFORCE Policy Engine")
+    if target.get("status") != "READY" or target.get("name") != TARGET_NAME:
+        raise Blocked("live Gateway target is not the expected READY target")
+    target_lambda = (target.get("targetConfiguration", {}).get("mcp", {})
+                     .get("lambda", {}).get("lambdaArn"))
+    if target.get("gatewayArn") != gateway_state["gatewayArn"] or target_lambda != lambda_arn:
+        raise Blocked("live Gateway target linkage does not match the retained Lambda")
+    if engine.get("status") != "ACTIVE" or policy.get("status") != "ACTIVE":
+        raise Blocked("live Policy Engine or policy is not ACTIVE")
+    if policy.get("enforcementMode") != "ACTIVE":
+        raise Blocked("live policy enforcement mode is not ACTIVE")
+    live_statement = policy.get("definition", {}).get("policy", {}).get("statement")
+    expected_statement = cedar_statement(identity["Arn"], gateway_state["gatewayArn"])
+    if live_statement != expected_statement:
+        raise Blocked("live Cedar statement is not exactly the reviewed permit")
+
+
+def inventory_and_cost(aws, project, lambda_arn, identity):
     _, resources, gateway_state = native_resources(project, complete=True)
     gateway_id = gateway_state["gatewayId"]
     target_id = gateway_state["targets"][TARGET_NAME]["targetId"]
@@ -693,19 +794,8 @@ def inventory_and_cost(aws, project, lambda_arn):
                            {"policyEngineId": engine["policyEngineId"]})
     policy_live = aws.call("bedrock-agentcore-control", "get-policy", {
         "policyEngineId": engine["policyEngineId"], "policyId": policy["policyId"]})
-    if (gateway.get("status") != "READY" or gateway.get("authorizerType") != "AWS_IAM"
-            or gateway.get("protocolType") != "MCP"):
-        raise Blocked("live Gateway configuration is not READY/AWS_IAM/MCP")
-    validate_gateway_url(gateway.get("gatewayUrl", ""))
-    if target.get("status") != "READY" or target.get("name") != TARGET_NAME:
-        raise Blocked("live Gateway target is not the expected READY target")
-    if engine_live.get("status") != "ACTIVE" or policy_live.get("status") != "ACTIVE":
-        raise Blocked("live Policy Engine or policy is not ACTIVE")
-    if policy_live.get("enforcementMode") != "ACTIVE":
-        raise Blocked("live policy enforcement mode is not ACTIVE")
-    definition = canonical(policy_live.get("definition", {}))
-    if FULL_TOOL_NAME not in definition or "environment" not in definition or "dev" not in definition:
-        raise Blocked("live Cedar policy definition does not match the reviewed intent")
+    validate_live_links(gateway, target, engine_live, policy_live, gateway_state,
+                        lambda_arn, identity)
     function = aws.call("lambda", "get-function", {"FunctionName": FUNCTION_NAME})
     if function["Configuration"].get("FunctionArn") != lambda_arn:
         raise Blocked("Lambda ARN linkage drift")
@@ -723,20 +813,11 @@ def inventory_and_cost(aws, project, lambda_arn):
     for tags in by_arn.values():
         assert_tags(tags, "native AgentCore resource")
     app_stack, app_items = stack_resources(aws, resources["stackName"])
-    app_types = {item["ResourceType"] for item in app_items}
-    if app_types != EXPECTED_APP_TYPES:
-        raise Blocked("application stack contains unexpected or missing resource types")
+    app_counts = assert_resource_counts(app_items, EXPECTED_APP_COUNTS, "application stack")
     bootstrap_stack, bootstrap_items = stack_resources(aws, "CDKToolkit")
-    bootstrap_types = {item["ResourceType"] for item in bootstrap_items}
-    if not bootstrap_types.issubset(EXPECTED_BOOTSTRAP_TYPES):
-        raise Blocked("CDKToolkit contains an unexpected resource type")
-    required = {"AWS::S3::Bucket", "AWS::ECR::Repository", "AWS::SSM::Parameter"}
-    if not required.issubset(bootstrap_types):
-        raise Blocked("CDKToolkit inventory is incomplete")
-    kms_count = sum(item["ResourceType"] == "AWS::KMS::Key" for item in bootstrap_items)
-    if kms_count > 1:
-        raise Blocked("CDKToolkit KMS inventory is ambiguous")
-    estimated_cost = validate_cost(kms_count * KMS_KEY_MONTHLY_USD + OTHER_IDLE_BUFFER_USD)
+    bootstrap_counts = assert_resource_counts(
+        bootstrap_items, EXPECTED_BOOTSTRAP_COUNTS, "CDKToolkit")
+    kms_count = bootstrap_counts["AWS::KMS::Key"]
     log_name = f"/aws/lambda/{FUNCTION_NAME}"
     logs = aws.call("logs", "describe-log-groups", {"logGroupNamePrefix": log_name, "limit": 10})
     exact_logs = [item for item in logs.get("logGroups", []) if item.get("logGroupName") == log_name]
@@ -745,11 +826,14 @@ def inventory_and_cost(aws, project, lambda_arn):
     log_arn = exact_logs[0]["arn"].removesuffix(":*")
     log_tags = aws.call("logs", "list-tags-for-resource", {"resourceArn": log_arn}).get("tags", {})
     assert_tags(log_tags, "Lambda log group")
+    storage = retained_storage_bytes(aws, bootstrap_items, exact_logs[0])
+    estimated_cost = retained_cost(kms_count, storage)
     summary = {"checked_at": datetime.now(timezone.utc).isoformat(),
         "application_stack_status": app_stack["StackStatus"],
-        "application_resource_types": sorted(app_types),
+        "application_resource_counts": dict(sorted(app_counts.items())),
         "bootstrap_stack_status": bootstrap_stack["StackStatus"],
-        "bootstrap_resource_types": sorted(bootstrap_types), "kms_key_count": kms_count,
+        "bootstrap_resource_counts": dict(sorted(bootstrap_counts.items())),
+        "kms_key_count": kms_count, "retained_storage_bytes": storage,
         "estimated_monthly_idle_cost_usd": estimated_cost,
         "gateway_status": gateway["status"], "target_status": target["status"],
         "policy_engine_status": engine_live["status"], "policy_status": policy_live["status"],
@@ -796,9 +880,9 @@ def prove_live(converge=False):
     lambda_arn = ensure_lambda_prerequisite(aws, identity)
     project = (converge_native(private_dir, lambda_arn, identity) if converge
                else private_dir / "Issue31Policy" / "agentcore")
-    gateway, _ = inventory_and_cost(aws, project, lambda_arn)
+    gateway, _ = inventory_and_cost(aws, project, lambda_arn, identity)
     evidence = prove_deltas(aws, gateway)
-    _, cost = inventory_and_cost(aws, project, lambda_arn)
+    _, cost = inventory_and_cost(aws, project, lambda_arn, identity)
     print("DEV_DECISION=ALLOW")
     print(f"DEV_BACKEND_CALLS={evidence['dev_backend_delta']}")
     print("PROD_DECISION=DENY")

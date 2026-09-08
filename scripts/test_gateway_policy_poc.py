@@ -74,6 +74,18 @@ class GatewayPolicyPocTest(unittest.TestCase):
             poc.require_live_gates(fake)
         fake.call.assert_called_once()
 
+    def test_scoped_aws_environment_removes_ambient_credentials(self):
+        source = {"AWS_ACCESS_KEY_ID": "ambient", "AWS_SECRET_ACCESS_KEY": "ambient",
+                  "AWS_SESSION_TOKEN": "ambient", "AWS_WEB_IDENTITY_TOKEN_FILE": "/tmp/x",
+                  "AWS_ROLE_ARN": "ambient", "KEEP_ME": "yes"}
+        env = poc.scoped_aws_env(source)
+        for name in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN",
+                     "AWS_WEB_IDENTITY_TOKEN_FILE", "AWS_ROLE_ARN"):
+            self.assertNotIn(name, env)
+        self.assertEqual(env["AWS_PROFILE"], poc.PROFILE)
+        self.assertEqual(env["AWS_REGION"], poc.REGION)
+        self.assertEqual(env["KEEP_ME"], "yes")
+
     def test_exact_allow_and_deny_responses_pass(self):
         poc.validate_results(200, dev_response(), 1, 200, prod_response(), 0)
 
@@ -115,6 +127,50 @@ class GatewayPolicyPocTest(unittest.TestCase):
         with mock.patch.object(poc, "metric_sum", return_value=2):
             with self.assertRaises(poc.Blocked):
                 poc.wait_for_metric(mock.Mock(), mock.Mock(), 1, [], timeout=1)
+
+    def test_exact_topology_counts_reject_duplicates(self):
+        items = [{"ResourceType": key} for key, count in poc.EXPECTED_APP_COUNTS.items()
+                 for _ in range(count)]
+        self.assertEqual(poc.assert_resource_counts(
+            items, poc.EXPECTED_APP_COUNTS, "app"), poc.EXPECTED_APP_COUNTS)
+        with self.assertRaises(poc.Blocked):
+            poc.assert_resource_counts(items + [items[0]], poc.EXPECTED_APP_COUNTS, "app")
+
+    def test_measured_storage_is_included_in_cost(self):
+        empty = {"s3_bytes": 0, "ecr_bytes": 0, "log_bytes": 0}
+        one_gib_each = {"s3_bytes": 1024 ** 3, "ecr_bytes": 1024 ** 3,
+                        "log_bytes": 1024 ** 3}
+        self.assertEqual(poc.retained_cost(1, empty), 1.01)
+        self.assertAlmostEqual(poc.retained_cost(1, one_gib_each), 1.76)
+        with self.assertRaises(poc.Blocked):
+            poc.retained_cost(2, empty)
+
+    def test_live_linkage_and_exact_cedar_statement(self):
+        gateway_arn = "arn:aws:bedrock-agentcore:ap-southeast-1:111122223333:gateway/demo"
+        engine_arn = "arn:aws:bedrock-agentcore:ap-southeast-1:111122223333:policy-engine/demo"
+        lambda_arn = "arn:aws:lambda:ap-southeast-1:111122223333:function:demo"
+        identity = {"Arn": "arn:aws:sts::111122223333:assumed-role/Demo/session"}
+        gateway_state = {"gatewayArn": gateway_arn}
+        gateway = {"status": "READY", "authorizerType": "AWS_IAM", "protocolType": "MCP",
+                   "gatewayUrl": "https://demo.gateway.bedrock-agentcore.ap-southeast-1.amazonaws.com",
+                   "policyEngineConfiguration": {"arn": engine_arn, "mode": "ENFORCE"}}
+        target = {"status": "READY", "name": poc.TARGET_NAME, "gatewayArn": gateway_arn,
+                  "targetConfiguration": {"mcp": {"lambda": {"lambdaArn": lambda_arn}}}}
+        engine = {"status": "ACTIVE", "policyEngineArn": engine_arn}
+        policy = {"status": "ACTIVE", "enforcementMode": "ACTIVE", "definition": {
+            "policy": {"statement": poc.cedar_statement(identity["Arn"], gateway_arn)}}}
+        poc.validate_live_links(gateway, target, engine, policy, gateway_state,
+                                lambda_arn, identity)
+        policy["definition"]["policy"]["statement"] += " permit(principal);"
+        with self.assertRaises(poc.Blocked):
+            poc.validate_live_links(gateway, target, engine, policy, gateway_state,
+                                    lambda_arn, identity)
+        policy["definition"]["policy"]["statement"] = poc.cedar_statement(
+            identity["Arn"], gateway_arn)
+        target["targetConfiguration"]["mcp"]["lambda"]["lambdaArn"] += "-other"
+        with self.assertRaises(poc.Blocked):
+            poc.validate_live_links(gateway, target, engine, policy, gateway_state,
+                                    lambda_arn, identity)
 
     def test_private_native_project_shape_and_permissions(self):
         identity = {"Account": "111122223333",
