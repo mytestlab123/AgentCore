@@ -45,17 +45,43 @@ class GatewayVisualDemoTest(unittest.TestCase):
 
         base = self.start_server(visual.GatewayVisualController(runner))
         with urllib.request.urlopen(urllib.request.Request(
-                f"{base}/api/allow", data=b"", method="POST")) as response:
+                f"{base}/api/allow", data=b"", headers={"Origin": base}, method="POST")) as response:
             result = json.loads(response.read())
         self.assertEqual(result["decision"], "ALLOW")
         self.assertEqual(calls, ["allow"])
+        localhost = base.replace("127.0.0.1", "localhost")
+        with urllib.request.urlopen(urllib.request.Request(
+                f"{localhost}/api/allow", data=b"", headers={"Origin": localhost}, method="POST")) as response:
+            result = json.loads(response.read())
+        self.assertEqual(result["decision"], "ALLOW")
+        self.assertEqual(calls, ["allow", "allow"])
         for path, data in (("/api/unknown", b""), ("/api/allow?environment=prod", b""),
                            ("/api/allow", b'{"environment":"prod"}')):
             with self.subTest(path=path), self.assertRaises(urllib.error.HTTPError) as rejected:
                 urllib.request.urlopen(urllib.request.Request(
-                    f"{base}{path}", data=data, method="POST"))
-            self.assertIn(rejected.exception.code, {400, 404})
-        self.assertEqual(calls, ["allow"])
+                    f"{base}{path}", data=data, headers={"Origin": base}, method="POST"))
+            self.assertIn(rejected.exception.code, {403, 404})
+        self.assertEqual(calls, ["allow", "allow"])
+
+    def test_cross_origin_or_rebound_host_never_reaches_action_runner(self):
+        calls = []
+
+        def runner(action):
+            calls.append(action)
+            return visual.public_result("ALLOW", 1, "PASS", "PENDING")
+
+        base = self.start_server(visual.GatewayVisualController(runner))
+        rejected_headers = (
+            {},
+            {"Origin": "http://attacker.invalid"},
+            {"Origin": base, "Host": "attacker.invalid"},
+        )
+        for headers in rejected_headers:
+            with self.subTest(headers=headers), self.assertRaises(urllib.error.HTTPError) as rejected:
+                urllib.request.urlopen(urllib.request.Request(
+                    f"{base}/api/allow", data=b"", headers=headers, method="POST"))
+            self.assertEqual(rejected.exception.code, 403)
+        self.assertEqual(calls, [])
 
     def test_page_and_blocked_result_never_expose_private_values(self):
         controller = visual.GatewayVisualController(
@@ -71,7 +97,7 @@ class GatewayVisualDemoTest(unittest.TestCase):
             self.assertEqual(response.status, 204)
             self.assertEqual(response.read(), b"")
         with urllib.request.urlopen(urllib.request.Request(
-                f"{base}/api/deny", data=b"", method="POST")) as response:
+                f"{base}/api/deny", data=b"", headers={"Origin": base}, method="POST")) as response:
             blocked = response.read().decode()
         for prohibited in ("arn:aws", "111122223333", "https://private.invalid"):
             self.assertNotIn(prohibited, blocked)

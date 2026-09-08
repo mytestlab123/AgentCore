@@ -22,6 +22,14 @@ Follow KISS and optimize for a 3-5 minute demo.
 - Before starting, stopping, or configuring a listener, read
   `/home/user/.codex/port.md` completely and follow it.
 - Bind development services to loopback by default.
+- In Amit-facing instructions and handoffs, write local service URLs as
+  `http://localhost:<actual-port>/`; reserve the literal `127.0.0.1` form for
+  listener binding, internal assertions, and troubleshooting evidence.
+- Browser/UI validation may run on this office WSL host, the verified `home`
+  Ubuntu host, or an explicitly approved deployment host. Verify the selected
+  host's checkout, loopback listener, protected prerequisites, and current
+  authorization first; never transfer credentials or bypass a proof gate to
+  switch hosts. State the actual test host in the proof.
 - Never stop another repo's listener to reclaim a preferred port.
 
 ## Validation

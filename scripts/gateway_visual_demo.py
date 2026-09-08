@@ -202,6 +202,17 @@ class GatewayVisualHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
+    def _is_same_loopback_origin(self):
+        host, port = self.server.server_address[:2]
+        authorities = {
+            (f"{host}:{port}", f"http://{host}:{port}"),
+            (f"localhost:{port}", f"http://localhost:{port}"),
+        }
+        return (
+            self.client_address[0] == HOST
+            and (self.headers.get("Host"), self.headers.get("Origin")) in authorities
+        )
+
     def do_GET(self):
         parsed = urlsplit(self.path)
         if parsed.query or parsed.fragment:
@@ -218,10 +229,11 @@ class GatewayVisualHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urlsplit(self.path)
         content_length = self.headers.get("Content-Length")
-        if (parsed.query or parsed.fragment or self.headers.get("Transfer-Encoding")
+        if (not self._is_same_loopback_origin() or parsed.query or parsed.fragment
+                or self.headers.get("Transfer-Encoding")
                 or content_length not in {None, "0"}):
             self.close_connection = True
-            self._send_json(HTTPStatus.BAD_REQUEST, blocked_result())
+            self._send_json(HTTPStatus.FORBIDDEN, blocked_result())
             return
         action = {"/api/allow": "allow", "/api/deny": "deny"}.get(parsed.path)
         if action is None:
@@ -238,7 +250,7 @@ def create_server(port=PORT, controller=None):
 
 def serve_forever():
     server = create_server()
-    print(f"GATEWAY_VISUAL_URL=http://{HOST}:{PORT}/", flush=True)
+    print(f"GATEWAY_VISUAL_URL=http://localhost:{PORT}/", flush=True)
     print("GATEWAY_VISUAL_SERVER=READY", flush=True)
     try:
         server.serve_forever()

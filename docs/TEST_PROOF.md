@@ -4,7 +4,7 @@ Last verified: 1 September 2026, 00:09 SGT
 
 ## Issue #38 Gateway Policy visual demo
 
-Last verified: 8 September 2026, 11:53 SGT
+Last verified: 8 September 2026, 12:27 SGT
 
 The retained native AgentCore Gateway proof was exercised through a deliberately
 small loopback-only visual page. The page has exactly two fixed buttons; it
@@ -12,7 +12,7 @@ accepts no free-form input and never receives a credential, ARN, Gateway URL,
 account ID, identity hash, policy response, or raw AWS response.
 
 ```text
-APP_URL=http://127.0.0.1:3334/ ./scripts/browser-e2e.sh
+APP_URL=http://localhost:3334/ ./scripts/browser-e2e.sh
 ```
 
 Result: **PASS**.
@@ -29,7 +29,7 @@ resource was created, updated, deployed, bootstrapped, deleted, or cleaned up.
 
 Private evidence:
 
-`/home/user/.AGENTS-temp/AgentCore/browser-e2e/20260908T114806+0800/`
+`/home/user/.AGENTS-temp/AgentCore/browser-e2e/20260908T122111+0800/`
 
 Windows review copies:
 

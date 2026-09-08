@@ -15,10 +15,15 @@ cd /home/user/git/AgentCore
 python3 scripts/gateway_visual_demo.py --serve
 ```
 
-Open `http://127.0.0.1:3334/`.
+Open `http://localhost:3334/`.
 
 The server binds only to `127.0.0.1:3334`. Stop it with `Ctrl+C`. It creates,
 updates, deploys, bootstraps, deletes, and cleans up nothing.
+
+Every action POST must originate from the local TCP loopback peer and use one
+of the two exact paired loopback authorities: `127.0.0.1:<port>` or
+`localhost:<port>`. A missing, foreign, or mismatched `Host`/`Origin` returns
+only a static `403` BLOCKED result and never reaches the action runner.
 
 ## Demo
 
@@ -64,7 +69,7 @@ retry by deploying, changing IAM, or copying credentials.
 
 ```bash
 ./scripts/check.sh
-APP_URL=http://127.0.0.1:3334/ ./scripts/browser-e2e.sh
+APP_URL=http://localhost:3334/ ./scripts/browser-e2e.sh
 ```
 
 The browser run records screenshots and sanitized results under the private
