@@ -68,6 +68,11 @@ default-deny. If any prerequisite, role authorization, retained resource, or
 expected response is missing, the MCP response is **BLOCKED** and records no
 local effect. `BLOCKED` is a safe operational result, not an AWS success.
 
+The EC2 role also needs the single IAM transport permission
+`bedrock-agentcore:InvokeGateway` on that retained Gateway. This grants no
+target action by itself: the Gateway's active Cedar policy still admits only
+the fixed `dev` tool call and remains default-deny for `prod`.
+
 The authorization is named `Issue40LibreChatDevPermit`. Its deployment helper
 first verifies the pre-existing human permit byte-for-byte, permits only the
 EC2 role / fixed tool / retained Gateway / `dev` combination, and reads the

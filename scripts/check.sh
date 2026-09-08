@@ -32,6 +32,7 @@ AWS_PROFILE=amit ISSUE12_REGION=us-east-2 \
 python3 "$repo_dir/integration/librechat-governance/test_governance.py"
 PYTHONPATH="$repo_dir/scripts" python3 "$repo_dir/scripts/test_gateway_policy_poc.py"
 PYTHONPATH="$repo_dir/scripts" python3 "$repo_dir/scripts/test_issue40_gateway_authorize.py"
+PYTHONPATH="$repo_dir/scripts" python3 "$repo_dir/scripts/test_issue40_authorize_ec2_gateway.py"
 PYTHONPATH="$repo_dir/scripts" python3 "$repo_dir/scripts/test_issue40_configure_librechat.py"
 PYTHONPATH="$repo_dir/scripts" python3 "$repo_dir/scripts/test_gateway_visual_demo.py"
 if rg -n 'localStorage|sessionStorage|indexedDB' \
