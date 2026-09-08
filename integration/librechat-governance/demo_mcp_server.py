@@ -220,16 +220,19 @@ def unrestricted_ssh_sources(permissions: Any) -> list[str]:
 def read_security_group_ssh(*, runner: Any = subprocess.run) -> dict[str, str]:
     """Read one fixed Security Group and return a deliberately tiny safe result."""
     require_setting("GOVERNANCE_AWS_READ_ENABLED")
-    completed = runner(
-        [
-            "aws", "ec2", "describe-security-groups", "--group-ids", security_group_id(),
-            "--region", aws_region(), "--output", "json", "--no-cli-pager",
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=20,
-    )
+    try:
+        completed = runner(
+            [
+                "aws", "ec2", "describe-security-groups", "--group-ids", security_group_id(),
+                "--region", aws_region(), "--output", "json", "--no-cli-pager",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise GovernanceBlocked("read-only Security Group query could not run") from exc
     if completed.returncode != 0:
         raise GovernanceBlocked("read-only Security Group query failed")
     try:

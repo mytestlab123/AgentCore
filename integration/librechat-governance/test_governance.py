@@ -151,6 +151,11 @@ Promise.all([run({{environment:'dev'}}), run({{environment:'prod',ticket:''}}), 
         ):
             with self.assertRaises(server.GovernanceBlocked):
                 server.read_security_group_ssh(runner=lambda *_args, **_kwargs: completed)
+        with mock.patch.dict(os.environ, settings, clear=False):
+            with self.assertRaises(server.GovernanceBlocked):
+                server.read_security_group_ssh(
+                    runner=lambda *_args, **_kwargs: (_ for _ in ()).throw(FileNotFoundError("aws")),
+                )
 
     def test_ssh_compliance_is_compliant_without_unrestricted_tcp_22(self) -> None:
         completed = subprocess.CompletedProcess(
