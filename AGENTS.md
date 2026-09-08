@@ -5,24 +5,36 @@
 Build a small, understandable internal AI platform POC following `ROADMAP.md`.
 Follow KISS and optimize for a 3-5 minute demo.
 
-The active implementation milestone is Issue #40: combine roadmap M1-M4 into
-one governed agent workflow MVP.
+The active implementation milestone is Issue #44: complete roadmap M5-M7 as
+one platform-experience and final Security Copilot demo.
 
 ## Scope
 
 - Keep local simulation usable without AWS.
 - Reuse the existing Project/Home, Playground, Logs, LibreChat, Gateway, Harness
   and validation paths before adding another framework.
-- Issue #40 may add one bounded Harness tool-use/resume flow, one real read-only
-  AWS lookup, and one harmless demo-owned controlled action behind approval and
-  Gateway Policy.
-- The real AWS capability for Issue #40 is read-only. Do not create, update, or
-  delete AWS resources unless Amit separately approves the exact mutation.
+- Reuse the merged M1-M4 governed workflow rather than rebuilding approval,
+  Gateway Policy, AWS read, or controlled-action plumbing.
 - Cognito, hosting, many projects/providers, billing, RAG, Kubernetes, complex
   routing, broad observability, and generic AWS-assistant behavior remain out of
   scope unless a later roadmap milestone explicitly requires them.
 - Never commit credentials, account IDs, tokens, private endpoints, or real API
   keys.
+
+## AWS test context
+
+- For AgentCore/Bedrock testing, use the `amit` AWS profile by default. This is
+  the known tested profile with the required Bedrock and AgentCore access.
+- The `dev` profile may be used when a task specifically needs that development
+  context.
+- Do not use a `prod` profile/account/environment for this POC or for routine
+  testing at this stage.
+- Do not switch to another AWS profile merely because a command is blocked.
+  Record the blocker or ask Amit if a different context is genuinely required.
+- Bounded AWS changes that are part of an approved POC milestone are acceptable;
+  keep them narrow, intentional, and recorded.
+- Before any AWS test, confirm the active identity/profile and Region. Do not
+  print or commit sensitive identity values as evidence.
 
 ## Local Operations
 
