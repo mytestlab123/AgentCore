@@ -45,6 +45,30 @@ reusing the merged M1-M7 platform and demo path.
 - Before any AWS test, confirm the active identity/profile and Region. Do not
   print or commit sensitive identity values as evidence.
 
+## AWS CLI first / KISS execution
+
+- For simple AWS reads, setup, verification, or one-off mutations, use the AWS
+  CLI directly. Do not create Python, shell, SDK, MCP, or helper wrappers around
+  work that is clearer as a few `aws ...` commands.
+- Prefer native AWS CLI features first: `--query`, `--output text|json`, command
+  substitution, and normal shell variables. Use `jq` only when the CLI query is
+  genuinely insufficient.
+- Do not use Python merely to extract IDs, build trivial JSON, count rules, hide
+  identifiers, or validate a small AWS CLI result. Keep sensitive values in an
+  unprinted shell variable or a private mode-600 temporary file when needed.
+- Do not add a reusable script for a one-time or very short AWS operation. Prove
+  the direct commands first; automate only when repetition or real complexity
+  justifies it.
+- Python/SDK code remains appropriate for application runtime logic, tests,
+  non-trivial data processing, or reusable behavior that the AWS CLI cannot
+  express cleanly. The burden is on the worker to keep the simpler CLI path when
+  both approaches are equivalent.
+- Prefer one provider read and one exact action over multiple discovery layers.
+  Do not add service enablement, scanners, or orchestration when a direct API/CLI
+  read already proves the demo requirement.
+- In handoffs, report the exact AWS CLI action/result and the useful evidence;
+  avoid long implementation narratives for simple cloud operations.
+
 ## Local Operations
 
 - The home Linux host is a trusted single-user lab. Do not add local auth,
