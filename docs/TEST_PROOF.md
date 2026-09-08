@@ -1,6 +1,33 @@
 # AgentCore Test Proof
 
-Last verified: 8 September 2026, 15:00 SGT
+Last verified: 8 September 2026, 16:27 SGT
+
+## Issue #44 compact Security Copilot audit — live backend proof
+
+Last verified: 8 September 2026, 16:27 SGT
+
+The deployed LibreChat host was updated to PR #45 commit `bcc01e8` and its
+single backend process was restarted after a clean-checkout, Python-compilation
+gate. The controlled proof ran the deployed MCP source with a temporary private
+state directory; it did not alter the normal demo state.
+
+| Step | Observed result |
+| --- | --- |
+| Sanitized `web-01` read | `LIVE_MCP_AWS_READ=ALLOW` |
+| Controlled `dev` request | `LIVE_GATEWAY_DEV=ALLOW`; exactly one temporary local marker |
+| Controlled `prod` request | `LIVE_GATEWAY_PROD=DENY`; zero additional marker |
+| Compact result sequence | `LIVE_COMPACT_AUDIT=PASS` |
+
+The checked response text contains the visible sequence `request -> tool ->
+human decision -> Gateway decision -> backend -> final result`. No account ID,
+ARN, Gateway URL, credential, or raw AWS response was recorded. The host was
+healthy on port 80 after the restart, and the command reported
+`LIVE_AWS_OR_INFRASTRUCTURE_MUTATION=none`.
+
+Proof boundary: this is a direct live MCP/backend proof, not a native
+LibreChat-browser click proof. A new browser session stops at LibreChat login
+without an authenticated test account; manual native UI acceptance remains
+required for **Reject**, **Approve**, and the submitted `prod` **DENY** card.
 
 ## Issue #40 LibreChat native-approval browser boundary
 

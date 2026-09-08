@@ -206,8 +206,33 @@ Expected behavior:
 - LibreChat shows the native approval prompt again.
 - Choose **Approve**.
 - One harmless local demo state change is recorded.
-- The MCP response is formatted as `ASK / APPROVE` and reports one MCP call,
-  no AWS or infrastructure mutation, and no secret access.
+- The MCP response begins `ASK / APPROVE / ALLOW - Remediation completed` and
+  reports one MCP call, no AWS or infrastructure mutation, and no secret
+  access.
+- Under the result, read the **Compact audit** in this order: request, tool,
+  upstream execution authorization, Gateway **ALLOW**, one harmless local
+  backend effect, final `ASK / APPROVE / ALLOW` result.
+
+### DENY: Gateway blocks a submitted controlled request
+
+Prompt:
+
+```text
+Apply the remediation for web-01 in prod with ticket DEMO-123.
+```
+
+Expected behavior:
+
+- LibreChat can show its native approval prompt. Choose **Approve** then
+  **Submit** so the controlled request reaches the independent Gateway check.
+- The Gateway returns **DENY** for `prod`.
+- The result begins `DENY - Gateway Policy blocked remediation`.
+- Its **Compact audit** shows Gateway **DENY** and local demo effect **not
+  recorded**. The previous successful `dev` effect count does not increase.
+
+This is different from a **Reject** card: Reject stops the MCP server before it
+is called, while this test proves a submitted request is independently blocked
+at the retained Gateway.
 
 ### DENY: deletion prohibited
 
@@ -246,7 +271,8 @@ Apply the remediation for web-01 in prod with ticket DEMO-123.
 ```
 
 The hook abstains when the ticket is present, so the static policy still shows
-the native `ASK` approval. The human must approve or reject it.
+the native `ASK` approval. The human must approve or reject it; after approval,
+the retained Gateway still denies the `prod` request as described above.
 
 ## 5. What the buttons mean
 
@@ -262,7 +288,28 @@ The model does not receive AWS credentials and does not execute shell, CLI, or
 Python commands. LibreChat enforces the native policy and calls the local MCP
 demo server only after the policy decision.
 
-## 6. If Agents is missing
+## 6. Read the compact audit correctly
+
+Every completed MCP result displays the same six-part audit story:
+
+```text
+request -> tool -> human decision -> Gateway decision -> backend -> final result
+```
+
+- Read-only `ALLOW` has **not required** for the human and Gateway steps; its
+  backend evidence is the sanitized STS identity read.
+- A native **Reject** has no MCP result because the server is intentionally not
+  called. The LibreChat `Cancelled` approval card is the evidence; no local
+  effect is recorded.
+- A `dev` **Approve** result shows Gateway `ALLOW` and exactly one harmless
+  local marker.
+- A submitted `prod` request shows Gateway `DENY` and no additional local
+  marker.
+
+The audit is a compact demo record, not a new observability platform. It never
+contains AWS identities, endpoints, credentials, or secrets.
+
+## 7. If Agents is missing
 
 The LibreChat deployment must include the Agents endpoint in `.env`:
 
@@ -285,7 +332,7 @@ Do not change Mongo roles or passwords just to make the menu appear. If the
 endpoint is still absent after a fresh login, ask the operator to check the
 backend configuration and logs.
 
-## 7. Admin and permissions
+## 8. Admin and permissions
 
 The first registered LibreChat account is the built-in `ADMIN` account. There
 is no universal username/password and passwords cannot be displayed from the
@@ -302,7 +349,7 @@ administrator deploys it later, use **Roles -> USER -> Permissions** to review
 the three permissions above. Keep sharing and public access disabled for this
 POC.
 
-## 8. Safe operating boundaries
+## 9. Safe operating boundaries
 
 - Use only the synthetic `web-01` demo value.
 - Do not paste AWS keys, bearer tokens, passwords, or private endpoints into
@@ -313,7 +360,7 @@ POC.
 - The local state file is private operator state and must remain mode `600` in a
   directory with mode `700`.
 
-## 9. Operator configuration and proof files
+## 10. Operator configuration and proof files
 
 The implementation contract and native configuration example are in:
 

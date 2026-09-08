@@ -121,7 +121,10 @@ Promise.all([run({{environment:'dev'}}), run({{environment:'prod',ticket:''}}), 
                 "check_security_finding", {"host": "web-01"},
                 aws_read=lambda: {"api": "sts:GetCallerIdentity", "result": "identity verified", "mutation": "none"},
             )
-            self.assertIn("ALLOW - Security finding and AWS read returned", finding["content"][0]["text"])
+            finding_text = finding["content"][0]["text"]
+            self.assertIn("ALLOW - Security finding and AWS read returned", finding_text)
+            self.assertIn("### Compact audit", finding_text)
+            self.assertIn("Human decision: **not required** (read-only)", finding_text)
 
             rejected_before_call = server.load_state().copy()
             self.assertEqual(rejected_before_call["remediation_calls"], 0)
@@ -130,7 +133,10 @@ Promise.all([run({{environment:'dev'}}), run({{environment:'prod',ticket:''}}), 
                 "apply_demo_remediation", {"host": "web-01", "environment": "dev"},
                 gateway_check=lambda environment: "ALLOW",
             )
-            self.assertIn("ASK / APPROVE / ALLOW - Remediation completed", approved["content"][0]["text"])
+            approved_text = approved["content"][0]["text"]
+            self.assertIn("ASK / APPROVE / ALLOW - Remediation completed", approved_text)
+            self.assertIn("Gateway decision: **ALLOW**", approved_text)
+            self.assertIn("Backend: one harmless local demo effect recorded", approved_text)
             self.assertEqual(server.load_state()["remediation_calls"], 1)
             self.assertTrue(server.load_state()["remediated"])
 
@@ -139,8 +145,15 @@ Promise.all([run({{environment:'dev'}}), run({{environment:'prod',ticket:''}}), 
                 gateway_check=lambda environment: "DENY",
             )
             self.assertTrue(gateway_denied["isError"])
-            self.assertIn("DENY - Gateway Policy blocked remediation", gateway_denied["content"][0]["text"])
+            denied_text = gateway_denied["content"][0]["text"]
+            self.assertIn("DENY - Gateway Policy blocked remediation", denied_text)
+            self.assertIn("Gateway decision: **DENY**", denied_text)
+            self.assertIn("Backend: local demo effect **not recorded**", denied_text)
             self.assertEqual(server.load_state()["remediation_calls"], 1)
+
+            audit_events = server.load_state()["audit_events"]
+            self.assertEqual(len(audit_events), 3)
+            self.assertEqual(audit_events[-1]["final_result"], "**DENY** — Gateway blocked remediation")
 
             deleted = server.call_tool("delete_demo_asset", {"host": "web-01"})
             self.assertTrue(deleted["isError"])

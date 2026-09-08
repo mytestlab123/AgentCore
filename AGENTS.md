@@ -15,6 +15,14 @@ one platform-experience and final Security Copilot demo.
   and validation paths before adding another framework.
 - Reuse the merged M1-M4 governed workflow rather than rebuilding approval,
   Gateway Policy, AWS read, or controlled-action plumbing.
+- Reuse the existing governed Codex, LibreChat, Gateway, Harness, and
+  validation paths. Present their existing evidence as one compact audit
+  sequence; do not build a second UI, observability system, or framework.
+- Issue #44 may use one bounded, read-only Agent Inspector/developer check of
+  the retained Gateway's known denied synthetic input. It is a developer/debug
+  proof, never the user-facing approval UI.
+- Do not create, update, or delete AWS resources unless Amit separately
+  approves the exact mutation.
 - Cognito, hosting, many projects/providers, billing, RAG, Kubernetes, complex
   routing, broad observability, and generic AWS-assistant behavior remain out of
   scope unless a later roadmap milestone explicitly requires them.
