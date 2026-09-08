@@ -1,38 +1,44 @@
 # AgentCore Test Proof
 
-Last verified: 8 September 2026, 18:55 SGT
+Last verified: 8 September 2026, 22:07 SGT
 
 ## Issue #46 real Security Group SSH signal — live host proof
 
-Last verified: 8 September 2026, 18:55 SGT
+Last verified: 8 September 2026, 22:07 SGT
 
-The deployed LibreChat MCP source was updated to PR #47 commit `712eab3` and
-the verified LibreChat process group was restarted cleanly. The dedicated demo
-Security Group is intentionally unattached and has unrestricted TCP/22 ingress.
-The host instance role received the one required read-only
-`ec2:DescribeSecurityGroups` List permission; its policy statement uses
-`Resource: "*"` because AWS does not define a resource type for that action.
-The MCP implementation still reads only its fixed private demo Group ID.
+The deployed LibreChat MCP source was updated to PR #47 commit `40da67d`.
+The dedicated demo Security Group remains intentionally unattached and is reset
+to its intentional unrestricted TCP/22 ingress state after proof. The host
+instance role has only the required read-only `ec2:DescribeSecurityGroups`
+List permission plus `ec2:RevokeSecurityGroupIngress` restricted to the
+fixed private demo Security Group. The MCP implementation still hard-binds both
+operations to that private Group ID and the exact TCP/22-from-`0.0.0.0/0`
+permission.
 
 | Step | Observed result |
 | --- | --- |
 | Local real AWS implementation path | sanitized `TCP/22` / `0.0.0.0/0` / `NON_COMPLIANT`; mutation `none` |
-| EC2 role authorization | `HOST_EC2_DESCRIBE_SECURITY_GROUPS=allowed` |
-| Deployed live MCP read | `LIVE_MCP_SECURITY_GROUP_READ=ALLOW` |
-| Compliance result | `LIVE_MCP_SECURITY_GROUP_COMPLIANCE=NON_COMPLIANT` |
-| Read operation side effect | `LIVE_MCP_AWS_MUTATION=none` |
-| State-file protection | `LIVE_MCP_STATE_FILE=private` |
-| LibreChat availability after restart | HTTP `200` |
+| Deterministic validation | `./scripts/check.sh` PASS; `git diff --check` PASS |
+| Host role authorization | exact revoke dry-run PASS; mutation `none` |
+| Deployed live approved path | Gateway `dev` ALLOW; exact TCP/22 IPv4 rule revoked |
+| Provider verification | MCP re-read and independent direct read both `COMPLIANT` |
+| Operator reset | direct `amit` CLI restored only TCP/22 from `0.0.0.0/0` |
+| Post-reset provider state | `NON_COMPLIANT`; ENI attachments `0` |
+| Submitted synthetic prod request | Gateway `DENY`; exact AWS revoke not called |
+| LibreChat availability after recovery | host port 80 and HTTP `200` |
 
-No AWS Security Group, network path, instance, secret, or controlled
-remediation was changed by this proof. The approved IAM read permission and
-private LibreChat MCP configuration were the only deployment changes.
+The only intended AWS state changes in this proof were: (1) the fixed demo
+Group's exact TCP/22-from-`0.0.0.0/0` rule was revoked once after Gateway
+`dev` ALLOW, and (2) the same rule was restored once by the documented
+operator-only CLI reset. No instance, ENI attachment, route, public IP,
+workload, secret, or other Security Group rule changed.
 
-Proof boundary: this is a real deployed MCP/backend result, not a native
-LibreChat-browser click proof. The repository browser runner tests only
-loopback-owned portal/Gateway applications and does not automate the separate
-authenticated LibreChat session. Manual native UI acceptance remains required
-for the visible Agent tool result.
+Proof boundary: this is a real deployed MCP/backend result. Amit's authenticated
+native LibreChat screenshot proves the read-only `ALLOW` card. The final
+remaining UI proof is one manual `Approve` + `Submit` of the dev remediation
+card, showing the exact AWS action and verified `COMPLIANT` state. The
+repository browser runner tests only loopback-owned portal/Gateway applications
+and does not automate a separate authenticated LibreChat session.
 
 An additional isolated **Playwright Core** run against the deployed LibreChat
 URL returned HTTP `200` and reached `/login` (`AUTHENTICATION_BOUNDARY`). It
