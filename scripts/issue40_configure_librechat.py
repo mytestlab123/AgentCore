@@ -21,6 +21,7 @@ from urllib.parse import urlparse
 
 REGION = "ap-southeast-1"
 URL_SUFFIX = f".gateway.bedrock-agentcore.{REGION}.amazonaws.com"
+SECURITY_GROUP_ID_PATTERN = re.compile(r"^sg-[0-9a-f]{8}(?:[0-9a-f]{9})?$")
 ALLOWED_TOP_LEVEL = {"command", "args", "env", "chatMenu"}
 
 
@@ -42,6 +43,12 @@ def require_gateway_url(value: str) -> str:
             or parsed.query or parsed.fragment):
         raise ConfigureBlocked("Gateway URL is not the expected managed endpoint")
     return value.rstrip("/")
+
+
+def require_security_group_id(value: str) -> str:
+    if not SECURITY_GROUP_ID_PATTERN.fullmatch(value):
+        raise ConfigureBlocked("demo Security Group ID is invalid")
+    return value
 
 
 def indent_width(line: str) -> int:
@@ -83,7 +90,9 @@ def known_top_level_fields(lines: list[str], start: int, end: int, server_indent
     return fields
 
 
-def render_block(*, indent: int, server_dir: Path, state_file: Path, gateway_url: str) -> list[str]:
+def render_block(
+    *, indent: int, server_dir: Path, state_file: Path, gateway_url: str, security_group_id: str,
+) -> list[str]:
     base = " " * indent
     nested = " " * (indent + 2)
     value = " " * (indent + 4)
@@ -96,6 +105,7 @@ def render_block(*, indent: int, server_dir: Path, state_file: Path, gateway_url
         f"{value}GOVERNANCE_STATE_FILE: {state_file}\n",
         f"{value}GOVERNANCE_AWS_READ_ENABLED: required\n",
         f"{value}GOVERNANCE_AWS_REGION: {REGION}\n",
+        f"{value}GOVERNANCE_SECURITY_GROUP_ID: {security_group_id}\n",
         f"{value}GOVERNANCE_GATEWAY_POLICY_ENABLED: required\n",
         f"{value}GOVERNANCE_GATEWAY_URL: {gateway_url}\n",
         f"{nested}chatMenu: false\n",
@@ -126,13 +136,15 @@ def atomic_write(config: Path, value: str) -> None:
         raise
 
 
-def configure(*, config: Path, server_dir: Path, state_file: Path, gateway_url: str) -> None:
+def configure(*, config: Path, server_dir: Path, state_file: Path, gateway_url: str, security_group_id: str) -> None:
     original = config.read_text(encoding="utf-8")
     lines = original.splitlines(keepends=True)
     start, end, indent = find_governance_block(lines)
     known_top_level_fields(lines, start, end, indent)
     replacement = render_block(
-        indent=indent, server_dir=server_dir, state_file=state_file, gateway_url=gateway_url)
+        indent=indent, server_dir=server_dir, state_file=state_file, gateway_url=gateway_url,
+        security_group_id=security_group_id,
+    )
     updated = "".join(lines[:start] + replacement + lines[end:])
     if updated == original:
         return
@@ -147,6 +159,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--server-dir", required=True)
     parser.add_argument("--state-file", required=True)
     parser.add_argument("--gateway-url", required=True)
+    parser.add_argument("--security-group-id", required=True)
     args = parser.parse_args(argv)
     if not args.approve:
         print("PLAN=replace only the known agentcore_governance MCP YAML block")
@@ -157,9 +170,13 @@ def main(argv: list[str] | None = None) -> int:
         server_dir = require_absolute_file(args.server_dir, "server directory")
         state_file = require_absolute_file(args.state_file, "state file")
         gateway_url = require_gateway_url(args.gateway_url)
+        security_group_id = require_security_group_id(args.security_group_id)
         if not config.is_file() or not (server_dir / "demo_mcp_server.py").is_file():
             raise ConfigureBlocked("required deployment files are absent")
-        configure(config=config, server_dir=server_dir, state_file=state_file, gateway_url=gateway_url)
+        configure(
+            config=config, server_dir=server_dir, state_file=state_file, gateway_url=gateway_url,
+            security_group_id=security_group_id,
+        )
     except (ConfigureBlocked, OSError) as error:
         print(f"BLOCKED={error}")
         return 2

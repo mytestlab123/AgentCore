@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Small stdio MCP server for the governed AgentCore demonstration.
 
-The server deliberately has a narrow surface: one sanitized read-only AWS STS
-check, one retained AgentCore Gateway decision check, and one local demo-state
-marker.  It never creates or mutates AWS resources.
+The server deliberately has a narrow surface: one sanitized read-only AWS
+Security Group SSH-compliance check, one retained AgentCore Gateway decision
+check, and one local demo-state marker. It never creates or mutates AWS
+resources.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from typing import Any
 from gateway_runtime_client import GatewayRuntimeBlocked, verify_gateway as invoke_gateway_runtime
 
 REGION_PATTERN = re.compile(r"^[a-z]{2}(?:-gov)?-[a-z]+-\d$")
+SECURITY_GROUP_ID_PATTERN = re.compile(r"^sg-[0-9a-f]{8}(?:[0-9a-f]{9})?$")
 
 
 class GovernanceBlocked(RuntimeError):
@@ -27,7 +29,11 @@ class GovernanceBlocked(RuntimeError):
 TOOLS = [
     {
         "name": "check_security_finding",
-        "description": "Read-only finding lookup plus a sanitized AWS STS identity check for web-01.",
+        "description": (
+            "Read-only unrestricted-SSH compliance check for the fixed dedicated "
+            "demo Security Group. Returns only sanitized rule, source, compliance, "
+            "and recommendation data for web-01."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {"host": {"type": "string", "enum": ["web-01"]}},
@@ -183,25 +189,74 @@ def aws_region() -> str:
     return region
 
 
-def read_aws_identity(*, runner: Any = subprocess.run) -> dict[str, str]:
-    """Run a fixed read-only identity query and discard all identity values."""
+def security_group_id() -> str:
+    value = os.environ.get("GOVERNANCE_SECURITY_GROUP_ID", "")
+    if not SECURITY_GROUP_ID_PATTERN.fullmatch(value):
+        raise GovernanceBlocked("required demo Security Group setting is absent or invalid")
+    return value
+
+
+def unrestricted_ssh_sources(permissions: Any) -> list[str]:
+    """Return only the fixed public CIDRs that make TCP/22 non-compliant."""
+    if not isinstance(permissions, list):
+        raise GovernanceBlocked("Security Group ingress rules are invalid")
+    sources: list[str] = []
+    for permission in permissions:
+        if not isinstance(permission, dict) or permission.get("IpProtocol") != "tcp":
+            continue
+        from_port = permission.get("FromPort")
+        to_port = permission.get("ToPort")
+        if not isinstance(from_port, int) or not isinstance(to_port, int) or not from_port <= 22 <= to_port:
+            continue
+        for range_value in permission.get("IpRanges", []):
+            if isinstance(range_value, dict) and range_value.get("CidrIp") == "0.0.0.0/0":
+                sources.append("0.0.0.0/0")
+        for range_value in permission.get("Ipv6Ranges", []):
+            if isinstance(range_value, dict) and range_value.get("CidrIpv6") == "::/0":
+                sources.append("::/0")
+    return list(dict.fromkeys(sources))
+
+
+def read_security_group_ssh(*, runner: Any = subprocess.run) -> dict[str, str]:
+    """Read one fixed Security Group and return a deliberately tiny safe result."""
     require_setting("GOVERNANCE_AWS_READ_ENABLED")
     completed = runner(
-        ["aws", "sts", "get-caller-identity", "--region", aws_region(), "--output", "json", "--no-cli-pager"],
+        [
+            "aws", "ec2", "describe-security-groups", "--group-ids", security_group_id(),
+            "--region", aws_region(), "--output", "json", "--no-cli-pager",
+        ],
         check=False,
         capture_output=True,
         text=True,
         timeout=20,
     )
     if completed.returncode != 0:
-        raise GovernanceBlocked("read-only AWS identity query failed")
+        raise GovernanceBlocked("read-only Security Group query failed")
     try:
-        identity = json.loads(completed.stdout)
+        payload = json.loads(completed.stdout)
     except (TypeError, json.JSONDecodeError) as exc:
-        raise GovernanceBlocked("read-only AWS identity query returned invalid JSON") from exc
-    if not all(isinstance(identity.get(key), str) and identity[key] for key in ("Account", "Arn", "UserId")):
-        raise GovernanceBlocked("read-only AWS identity query returned an incomplete identity")
-    return {"api": "sts:GetCallerIdentity", "result": "identity verified", "mutation": "none"}
+        raise GovernanceBlocked("read-only Security Group query returned invalid JSON") from exc
+    groups = payload.get("SecurityGroups") if isinstance(payload, dict) else None
+    if not isinstance(groups, list) or len(groups) != 1 or not isinstance(groups[0], dict):
+        raise GovernanceBlocked("read-only Security Group query returned an unexpected result")
+    sources = unrestricted_ssh_sources(groups[0].get("IpPermissions"))
+    if sources:
+        return {
+            "api": "ec2:DescribeSecurityGroups",
+            "rule": "TCP/22",
+            "source": ", ".join(sources),
+            "compliance": "NON_COMPLIANT",
+            "recommendation": "Remove the unrestricted TCP/22 ingress rule from the dedicated demo Security Group.",
+            "mutation": "none",
+        }
+    return {
+        "api": "ec2:DescribeSecurityGroups",
+        "rule": "TCP/22",
+        "source": "none",
+        "compliance": "COMPLIANT",
+        "recommendation": "No unrestricted TCP/22 ingress rule is present on the dedicated demo Security Group.",
+        "mutation": "none",
+    }
 
 
 def verify_gateway(environment: str, *, runner: Any = subprocess.run) -> str:
@@ -226,7 +281,7 @@ def call_tool(
     name: str,
     args: dict[str, Any],
     *,
-    aws_read: Any | None = None,
+    security_group_read: Any | None = None,
     gateway_check: Any | None = None,
 ) -> dict[str, Any]:
     state = load_state()
@@ -236,36 +291,37 @@ def call_tool(
 
     if name == "check_security_finding":
         try:
-            aws_result = (aws_read or read_aws_identity)()
+            security_result = (security_group_read or read_security_group_ssh)()
         except GovernanceBlocked:
-            return blocked_result("read-only AWS identity check unavailable")
+            return blocked_result("read-only Security Group compliance check unavailable")
         state["finding_calls"] += 1
         record_audit(
             state,
-            request="read-only security finding for `web-01`",
+            request="read-only unrestricted-SSH compliance check for `web-01`",
             tool=name,
             human_decision="**not required** (read-only)",
             gateway_decision="**not required** (no controlled action)",
-            backend="sanitized `sts:GetCallerIdentity`; mutation **none**",
-            final_result="**ALLOW** — finding returned",
+            backend="sanitized `ec2:DescribeSecurityGroups`; mutation **none**",
+            final_result=f"**ALLOW** — {security_result['compliance']} result returned",
         )
         save_state(state)
         return text_result(
-            "## ALLOW - Security finding and AWS read returned\n\n"
+            "## ALLOW - Real SSH compliance result returned\n\n"
             "- Host: `web-01`\n"
-            "- Severity: **HIGH**\n"
-            "- Finding: `demo-cve-2026-0001`\n"
-            "- Recommended action: patch package `demo-lib`\n"
-            f"- AWS API: `{aws_result['api']}` ({aws_result['result']})\n"
+            f"- Rule: `{security_result['rule']}`\n"
+            f"- Source: `{security_result['source']}`\n"
+            f"- Compliance: **{security_result['compliance']}**\n"
+            f"- Recommended action: {security_result['recommendation']}\n"
+            f"- AWS API: `{security_result['api']}`\n"
             "- MCP tool calls: **1**\n"
             "- AWS or infrastructure mutation: **none**\n\n"
             + audit_markdown(
-                request="read-only security finding for `web-01`",
+                request="read-only unrestricted-SSH compliance check for `web-01`",
                 tool=name,
                 human_decision="**not required** (read-only)",
                 gateway_decision="**not required** (no controlled action)",
-                backend="sanitized `sts:GetCallerIdentity`; mutation **none**",
-                final_result="**ALLOW** — finding returned",
+                backend="sanitized `ec2:DescribeSecurityGroups`; mutation **none**",
+                final_result=f"**ALLOW** — {security_result['compliance']} result returned",
             )
         )
 

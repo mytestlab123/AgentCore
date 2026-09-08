@@ -2,9 +2,10 @@
 
 This integration is a small governed MCP tool flow for the AgentCore POC.
 LibreChat owns the approval UI, checkpoint/resume, static allow/ask/deny policy,
-and trusted approval hook. The dependency-free MCP server uses synthetic finding
-data, one fixed read-only AWS STS query, the retained Gateway verifier, and one
-harmless local state file. It never creates or mutates AWS resources.
+and trusted approval hook. The dependency-free MCP server reads one fixed
+dedicated demo Security Group with `ec2:DescribeSecurityGroups`, evaluates only
+unrestricted TCP/22 ingress, uses the retained Gateway verifier, and records a
+harmless local state marker. It never creates or mutates AWS resources.
 
 ## Configure
 
@@ -14,8 +15,10 @@ harmless local state file. It never creates or mutates AWS resources.
    are also configured; `agents` must be listed or the native Agents endpoint
    is hidden from the endpoint selector.
 4. In the private LibreChat runtime, use the host instance role for the
-   read-only `sts:GetCallerIdentity` query and the fixed retained-Gateway MCP
-   call. Set the existing managed Gateway URL in `GOVERNANCE_GATEWAY_URL`.
+   read-only `ec2:DescribeSecurityGroups` query and the fixed retained-Gateway
+   MCP call. Set the dedicated demo Security Group ID in
+   `GOVERNANCE_SECURITY_GROUP_ID` and the existing managed Gateway URL in
+   `GOVERNANCE_GATEWAY_URL`.
    The Gateway Cedar policy, not a copied local credential, must authorize that
    instance role for the narrow `dev` tool call.
 5. Ensure the state directory is private (`700`) and restart LibreChat so the
@@ -31,8 +34,9 @@ do not fall through on older saved agents.
 ## Five-minute flow
 
 1. Ask `Check the security finding for web-01.` The check tool is **ALLOW** and
-   reports the synthetic finding plus the sanitized result of
-   `sts:GetCallerIdentity`; no account, ARN, or user ID is displayed.
+   reports only the fixed rule, public source, compliance state, and exact
+   recommendation from the dedicated demo Security Group. No group ID, VPC ID,
+   account value, ARN, raw payload, or credential is displayed.
 2. Ask `Apply the remediation for web-01 in dev.` Select **Reject**. The MCP
    server is not called and the state remains unchanged (**ASK / Reject**).
    LibreChat may render this native rejection as **Cancelled**; that is the

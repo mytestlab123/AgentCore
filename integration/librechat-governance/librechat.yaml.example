@@ -9,10 +9,11 @@ mcpServers:
       - /absolute/path/to/AgentCore/integration/librechat-governance/demo_mcp_server.py
     env:
       GOVERNANCE_STATE_FILE: /absolute/path/to/private/agentcore-governance/state.json
-      # Enables one fixed, sanitized `sts:GetCallerIdentity` read. Credentials
-      # and expected Gateway identity hashes stay in the private host runtime.
+      # Enables one fixed, sanitized `ec2:DescribeSecurityGroups` read against
+      # the dedicated demo Security Group. This placeholder is not a real ID.
       GOVERNANCE_AWS_READ_ENABLED: required
       GOVERNANCE_AWS_REGION: ap-southeast-1
+      GOVERNANCE_SECURITY_GROUP_ID: sg-0123456789abcdef0
       # Enables the packaged, fixed Gateway runtime client. Set the existing
       # managed Gateway endpoint only in private deployment configuration.
       GOVERNANCE_GATEWAY_POLICY_ENABLED: required

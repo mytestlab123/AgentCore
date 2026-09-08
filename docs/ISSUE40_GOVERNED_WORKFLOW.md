@@ -16,10 +16,12 @@ LibreChat Agent
   -> local demo-state marker (only after Gateway ALLOW)
 ```
 
-- `check_security_finding(web-01)` is **ALLOW**. It returns the fixed synthetic
-  finding and calls the fixed read-only `sts:GetCallerIdentity` AWS API. The
-  public result says only that identity was verified; it does not expose account
-  ID, ARN, user ID, credential material, or AWS error text.
+- `check_security_finding(web-01)` is **ALLOW**. It reads only the fixed,
+  dedicated Issue #46 demo Security Group with `ec2:DescribeSecurityGroups`
+  and evaluates unrestricted TCP/22 ingress. The public result contains only
+  rule, public source, compliance state, and exact recommendation; it excludes
+  group/VPC/account identifiers, ARNs, credential material, and raw AWS error
+  text.
 - `apply_demo_remediation(web-01, dev)` is **ASK**. Native LibreChat **Reject**
   means the MCP server is never called. After **Approve**, the server requires
   the retained Gateway verifier to report `ALLOW` before it writes exactly one
@@ -57,12 +59,15 @@ private deployment configuration:
 ```text
 GOVERNANCE_AWS_READ_ENABLED=required
 GOVERNANCE_AWS_REGION=ap-southeast-1
+GOVERNANCE_SECURITY_GROUP_ID=sg-<dedicated-demo-group>
 GOVERNANCE_GATEWAY_POLICY_ENABLED=required
 GOVERNANCE_GATEWAY_URL=https://<existing-gateway>.gateway.bedrock-agentcore.ap-southeast-1.amazonaws.com
 ```
 
 The MCP runtime uses the LibreChat EC2 instance role; it never receives or
-copies the `amit` profile. The existing Gateway Cedar policy must grant that
+copies the `amit` profile. That role needs only the read-only
+`ec2:DescribeSecurityGroups` permission required for the fixed demo Security
+Group. The existing Gateway Cedar policy must grant that
 specific role only the fixed `check_demo_scope` action in `dev`; `prod` remains
 default-deny. If any prerequisite, role authorization, retained resource, or
 expected response is missing, the MCP response is **BLOCKED** and records no

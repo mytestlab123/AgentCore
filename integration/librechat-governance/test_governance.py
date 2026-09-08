@@ -41,6 +41,7 @@ class GovernanceContractTests(unittest.TestCase):
             "blank ticket is valid in dev",
             "Reject = no MCP call and no state change",
             "GOVERNANCE_AWS_READ_ENABLED: required",
+            "GOVERNANCE_SECURITY_GROUP_ID:",
             "GOVERNANCE_GATEWAY_POLICY_ENABLED: required",
             "GOVERNANCE_GATEWAY_URL:",
         ):
@@ -98,31 +99,97 @@ Promise.all([run({{environment:'dev'}}), run({{environment:'prod',ticket:''}}), 
                 if proc.stdout:
                     proc.stdout.close()
 
-    def test_read_only_aws_result_is_sanitized_and_controls_fail_closed(self) -> None:
+    def test_read_only_security_group_result_is_sanitized_and_controls_fail_closed(self) -> None:
         completed = subprocess.CompletedProcess(
             args=[], returncode=0,
-            stdout=json.dumps({"Account": "123456789012", "Arn": "arn:aws:sts::123456789012:assumed-role/demo/x", "UserId": "sensitive-id"}),
+            stdout=json.dumps({"SecurityGroups": [{
+                "GroupId": "sg-0123456789abcdef0",
+                "GroupName": "private-demo-name",
+                "Description": "private description",
+                "VpcId": "vpc-0123456789abcdef0",
+                "OwnerId": "123456789012",
+                "IpPermissions": [{
+                    "IpProtocol": "tcp", "FromPort": 22, "ToPort": 22,
+                    "IpRanges": [{"CidrIp": "0.0.0.0/0", "Description": "private rule description"}],
+                    "Ipv6Ranges": [{"CidrIpv6": "::/0"}],
+                }],
+            }]}),
             stderr="",
         )
-        with mock.patch.dict(os.environ, {"GOVERNANCE_AWS_READ_ENABLED": "required"}, clear=False):
-            result = server.read_aws_identity(runner=lambda *_args, **_kwargs: completed)
+        commands: list[list[str]] = []
+
+        def runner(command, **_kwargs):
+            commands.append(command)
+            return completed
+
+        settings = {
+            "GOVERNANCE_AWS_READ_ENABLED": "required",
+            "GOVERNANCE_SECURITY_GROUP_ID": "sg-0123456789abcdef0",
+        }
+        with mock.patch.dict(os.environ, settings, clear=False):
+            result = server.read_security_group_ssh(runner=runner)
         public = json.dumps(result)
-        self.assertEqual(result["api"], "sts:GetCallerIdentity")
-        for private_value in ("123456789012", "arn:aws", "sensitive-id"):
+        self.assertEqual(result["api"], "ec2:DescribeSecurityGroups")
+        self.assertEqual(result["compliance"], "NON_COMPLIANT")
+        self.assertEqual(result["source"], "0.0.0.0/0, ::/0")
+        self.assertEqual(
+            commands,
+            [[
+                "aws", "ec2", "describe-security-groups", "--group-ids", "sg-0123456789abcdef0",
+                "--region", "ap-southeast-1", "--output", "json", "--no-cli-pager",
+            ]],
+        )
+        for private_value in ("123456789012", "private-demo-name", "private description", "vpc-", "private rule description"):
             self.assertNotIn(private_value, public)
         with mock.patch.dict(os.environ, {"GOVERNANCE_AWS_READ_ENABLED": ""}, clear=False):
             with self.assertRaises(server.GovernanceBlocked):
-                server.read_aws_identity(runner=lambda *_args, **_kwargs: completed)
+                server.read_security_group_ssh(runner=lambda *_args, **_kwargs: completed)
+        with mock.patch.dict(
+            os.environ,
+            {"GOVERNANCE_AWS_READ_ENABLED": "required", "GOVERNANCE_SECURITY_GROUP_ID": ""},
+            clear=False,
+        ):
+            with self.assertRaises(server.GovernanceBlocked):
+                server.read_security_group_ssh(runner=lambda *_args, **_kwargs: completed)
+
+    def test_ssh_compliance_is_compliant_without_unrestricted_tcp_22(self) -> None:
+        completed = subprocess.CompletedProcess(
+            args=[], returncode=0,
+            stdout=json.dumps({"SecurityGroups": [{
+                "IpPermissions": [
+                    {"IpProtocol": "tcp", "FromPort": 443, "ToPort": 443, "IpRanges": [{"CidrIp": "0.0.0.0/0"}]},
+                    {"IpProtocol": "tcp", "FromPort": 22, "ToPort": 22, "IpRanges": [{"CidrIp": "10.0.0.0/8"}]},
+                ],
+            }]}),
+            stderr="",
+        )
+        settings = {
+            "GOVERNANCE_AWS_READ_ENABLED": "required",
+            "GOVERNANCE_SECURITY_GROUP_ID": "sg-0123456789abcdef0",
+        }
+        with mock.patch.dict(os.environ, settings, clear=False):
+            result = server.read_security_group_ssh(runner=lambda *_args, **_kwargs: completed)
+        self.assertEqual(result["compliance"], "COMPLIANT")
+        self.assertEqual(result["source"], "none")
 
     def test_allow_ask_gateway_deny_and_local_effect_contract(self) -> None:
         with tempfile.TemporaryDirectory() as temp, \
                 mock.patch.dict(os.environ, {"GOVERNANCE_STATE_FILE": str(Path(temp) / "state.json")}, clear=False):
             finding = server.call_tool(
                 "check_security_finding", {"host": "web-01"},
-                aws_read=lambda: {"api": "sts:GetCallerIdentity", "result": "identity verified", "mutation": "none"},
+                security_group_read=lambda: {
+                    "api": "ec2:DescribeSecurityGroups",
+                    "rule": "TCP/22",
+                    "source": "0.0.0.0/0",
+                    "compliance": "NON_COMPLIANT",
+                    "recommendation": "Remove the unrestricted TCP/22 ingress rule from the dedicated demo Security Group.",
+                    "mutation": "none",
+                },
             )
             finding_text = finding["content"][0]["text"]
-            self.assertIn("ALLOW - Security finding and AWS read returned", finding_text)
+            self.assertIn("ALLOW - Real SSH compliance result returned", finding_text)
+            self.assertIn("Compliance: **NON_COMPLIANT**", finding_text)
+            self.assertIn("Remove the unrestricted TCP/22 ingress rule", finding_text)
             self.assertIn("### Compact audit", finding_text)
             self.assertIn("Human decision: **not required** (read-only)", finding_text)
 
