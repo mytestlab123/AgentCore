@@ -65,4 +65,5 @@ interface:
     public: false
 
 # Mongo is LibreChat's primary-database checkpointer and is required for a
-# retained approval/resume demo. The MCP tools remain fully synthetic.
+# retained approval/resume demo. The controlled action remains synthetic; the
+# fixed Security Group check is a real read-only AWS query.
