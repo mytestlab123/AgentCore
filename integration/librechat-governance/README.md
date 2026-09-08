@@ -4,8 +4,9 @@ This integration is a small governed MCP tool flow for the AgentCore POC.
 LibreChat owns the approval UI, checkpoint/resume, static allow/ask/deny policy,
 and trusted approval hook. The dependency-free MCP server reads one fixed
 dedicated demo Security Group with `ec2:DescribeSecurityGroups`, evaluates only
-unrestricted TCP/22 ingress, uses the retained Gateway verifier, and records a
-harmless local state marker. It never creates or mutates AWS resources.
+unrestricted TCP/22 ingress, uses the retained Gateway verifier, and can revoke
+only the exact TCP/22-from-0.0.0.0/0 rule from that Group after approval. It
+never accepts a caller-selected AWS resource or generic AWS command.
 
 ## Configure
 
@@ -15,9 +16,9 @@ harmless local state marker. It never creates or mutates AWS resources.
    are also configured; `agents` must be listed or the native Agents endpoint
    is hidden from the endpoint selector.
 4. In the private LibreChat runtime, use the host instance role for the
-   read-only `ec2:DescribeSecurityGroups` query and the fixed retained-Gateway
+   `ec2:DescribeSecurityGroups` query, exact fixed-rule revoke, and retained-Gateway
    MCP call. Set the dedicated demo Security Group ID in
-   `GOVERNANCE_SECURITY_GROUP_ID` and the existing managed Gateway URL in
+   `GOVERNANCE_SECURITY_GROUP_ID`, enable both declared AWS settings, and set the existing managed Gateway URL in
    `GOVERNANCE_GATEWAY_URL`.
    The Gateway Cedar policy, not a copied local credential, must authorize that
    instance role for the narrow `dev` tool call.
@@ -45,16 +46,18 @@ do not fall through on older saved agents.
    the rejection, its final text should begin `ASK / REJECT`.
 3. Repeat and select **Approve**. The MCP server asks the already-retained
    AgentCore Gateway for the `dev` decision with the host instance role. Only
-   **ALLOW** records one harmless local effect (**ASK / Approve / ALLOW**). The
-   response reports one tool call, no AWS mutation, and no secret access. If
-   the Gateway role/URL/response gate is unavailable, the server returns
-   **BLOCKED** and records no effect.
+   **ALLOW** can revoke only the exact TCP/22 rule from `0.0.0.0/0`, then
+   immediately re-reads the same fixed Group and reports **COMPLIANT**
+   (**ASK / Approve / ALLOW**). The response reports one tool call, the exact
+   dedicated-rule mutation, verification, and no secret access. If the
+   Gateway role/URL/response gate is unavailable, the server returns
+   **BLOCKED** and does not call AWS.
 4. Ask `Delete web-01.` LibreChat blocks the call before the server runs
    (**DENY**).
 5. Remediation with `environment=prod` and no ticket is denied by the trusted
    hook. With `ticket=DEMO-123`, the hook abstains and static policy remains
-   **ASK**, but the retained Gateway returns **DENY** and the local effect is
-   still not recorded. This demonstrates the independent boundary after the UI
+   **ASK**, but the retained Gateway returns **DENY** and the exact AWS revoke
+   is not called. This demonstrates the independent boundary after the UI
    approval path.
 
 ## Offline proof
@@ -66,8 +69,8 @@ python3 integration/librechat-governance/test_governance.py
 ```
 
 The test checks the exact three tools, native policy patterns, hook decisions,
-sanitized AWS-result handling, Gateway allow/deny behavior, approved harmless
-effect, and mode-600 state handling. It injects deterministic fakes for the
+sanitized AWS-result handling, Gateway allow/deny behavior, approved exact
+revoke plus provider verification, and mode-600 state handling. It injects deterministic fakes for the
 AWS and Gateway boundaries; it does not claim a screenshot proves a running
 LibreChat deployment or a real AWS read.
 

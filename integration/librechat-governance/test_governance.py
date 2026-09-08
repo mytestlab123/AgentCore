@@ -39,8 +39,9 @@ class GovernanceContractTests(unittest.TestCase):
             "type: mongo",
             "ASK - Review {tool}.",
             "blank ticket is valid in dev",
-            "Reject = no MCP call and no state change",
+            "Reject = no MCP call and no AWS change",
             "GOVERNANCE_AWS_READ_ENABLED: required",
+            "GOVERNANCE_AWS_REMEDIATION_ENABLED: required",
             "GOVERNANCE_SECURITY_GROUP_ID:",
             "GOVERNANCE_GATEWAY_POLICY_ENABLED: required",
             "GOVERNANCE_GATEWAY_URL:",
@@ -177,7 +178,34 @@ Promise.all([run({{environment:'dev'}}), run({{environment:'prod',ticket:''}}), 
         self.assertEqual(result["compliance"], "COMPLIANT")
         self.assertEqual(result["source"], "none")
 
-    def test_allow_ask_gateway_deny_and_local_effect_contract(self) -> None:
+    def test_exact_revoke_uses_only_fixed_public_ipv4_ssh_rule(self) -> None:
+        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="{}", stderr="")
+        commands: list[list[str]] = []
+
+        def runner(command, **_kwargs):
+            commands.append(command)
+            return completed
+
+        settings = {
+            "GOVERNANCE_AWS_REMEDIATION_ENABLED": "required",
+            "GOVERNANCE_SECURITY_GROUP_ID": "sg-0123456789abcdef0",
+        }
+        with mock.patch.dict(os.environ, settings, clear=False):
+            server.revoke_unrestricted_ssh_ingress(runner=runner)
+        self.assertEqual(commands[0][:6], [
+            "aws", "ec2", "revoke-security-group-ingress", "--group-id", "sg-0123456789abcdef0",
+            "--ip-permissions",
+        ])
+        self.assertEqual(
+            json.loads(commands[0][6]),
+            [{"IpProtocol": "tcp", "FromPort": 22, "ToPort": 22, "IpRanges": [{"CidrIp": "0.0.0.0/0"}]}],
+        )
+        self.assertEqual(commands[0][7:], ["--region", "ap-southeast-1", "--output", "json", "--no-cli-pager"])
+        with mock.patch.dict(os.environ, {"GOVERNANCE_AWS_REMEDIATION_ENABLED": ""}, clear=False):
+            with self.assertRaises(server.GovernanceBlocked):
+                server.revoke_unrestricted_ssh_ingress(runner=runner)
+
+    def test_allow_ask_gateway_deny_and_exact_aws_remediation_contract(self) -> None:
         with tempfile.TemporaryDirectory() as temp, \
                 mock.patch.dict(os.environ, {"GOVERNANCE_STATE_FILE": str(Path(temp) / "state.json")}, clear=False):
             finding = server.call_tool(
@@ -198,30 +226,62 @@ Promise.all([run({{environment:'dev'}}), run({{environment:'prod',ticket:''}}), 
             self.assertIn("### Compact audit", finding_text)
             self.assertIn("Human decision: **not required** (read-only)", finding_text)
 
+            # Native LibreChat Reject never enters this function.  Its only
+            # truthful server-side proof is unchanged state.
             rejected_before_call = server.load_state().copy()
             self.assertEqual(rejected_before_call["remediation_calls"], 0)
+            self.assertEqual(rejected_before_call["aws_remediation_attempts"], 0)
 
+            reads = iter([
+                {
+                    "api": "ec2:DescribeSecurityGroups",
+                    "rule": "TCP/22",
+                    "source": "0.0.0.0/0",
+                    "compliance": "NON_COMPLIANT",
+                    "recommendation": "Remove the unrestricted TCP/22 ingress rule from the dedicated demo Security Group.",
+                    "mutation": "none",
+                },
+                {
+                    "api": "ec2:DescribeSecurityGroups",
+                    "rule": "TCP/22",
+                    "source": "none",
+                    "compliance": "COMPLIANT",
+                    "recommendation": "No unrestricted TCP/22 ingress rule is present on the dedicated demo Security Group.",
+                    "mutation": "none",
+                },
+            ])
+            revoked: list[bool] = []
             approved = server.call_tool(
                 "apply_demo_remediation", {"host": "web-01", "environment": "dev"},
                 gateway_check=lambda environment: "ALLOW",
+                security_group_read=lambda: next(reads),
+                security_group_revoke=lambda: revoked.append(True),
             )
             approved_text = approved["content"][0]["text"]
-            self.assertIn("ASK / APPROVE / ALLOW - Remediation completed", approved_text)
+            self.assertIn("ASK / APPROVE / ALLOW - AWS remediation verified", approved_text)
             self.assertIn("Gateway decision: **ALLOW**", approved_text)
-            self.assertIn("Backend: one harmless local demo effect recorded", approved_text)
+            self.assertIn("Provider verification: **COMPLIANT**", approved_text)
+            self.assertEqual(revoked, [True])
             self.assertEqual(server.load_state()["remediation_calls"], 1)
+            self.assertEqual(server.load_state()["aws_remediation_attempts"], 1)
+            self.assertTrue(server.load_state()["aws_remediation_verified"])
             self.assertTrue(server.load_state()["remediated"])
 
+            denied_calls: list[str] = []
             gateway_denied = server.call_tool(
                 "apply_demo_remediation", {"host": "web-01", "environment": "prod", "ticket": "DEMO-123"},
                 gateway_check=lambda environment: "DENY",
+                security_group_read=lambda: denied_calls.append("read"),
+                security_group_revoke=lambda: denied_calls.append("revoke"),
             )
             self.assertTrue(gateway_denied["isError"])
             denied_text = gateway_denied["content"][0]["text"]
             self.assertIn("DENY - Gateway Policy blocked remediation", denied_text)
             self.assertIn("Gateway decision: **DENY**", denied_text)
-            self.assertIn("Backend: local demo effect **not recorded**", denied_text)
+            self.assertIn("Exact AWS revoke called: **no**", denied_text)
+            self.assertEqual(denied_calls, [])
             self.assertEqual(server.load_state()["remediation_calls"], 1)
+            self.assertEqual(server.load_state()["aws_remediation_attempts"], 1)
 
             audit_events = server.load_state()["audit_events"]
             self.assertEqual(len(audit_events), 3)

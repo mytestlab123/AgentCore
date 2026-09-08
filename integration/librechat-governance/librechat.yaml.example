@@ -9,9 +9,11 @@ mcpServers:
       - /absolute/path/to/AgentCore/integration/librechat-governance/demo_mcp_server.py
     env:
       GOVERNANCE_STATE_FILE: /absolute/path/to/private/agentcore-governance/state.json
-      # Enables one fixed, sanitized `ec2:DescribeSecurityGroups` read against
-      # the dedicated demo Security Group. This placeholder is not a real ID.
+      # Enables one fixed, sanitized `ec2:DescribeSecurityGroups` read and the
+      # exact approved TCP/22-from-0.0.0.0/0 revoke against this one Group.
+      # This placeholder is not a real ID.
       GOVERNANCE_AWS_READ_ENABLED: required
+      GOVERNANCE_AWS_REMEDIATION_ENABLED: required
       GOVERNANCE_AWS_REGION: ap-southeast-1
       GOVERNANCE_SECURITY_GROUP_ID: sg-0123456789abcdef0
       # Enables the packaged, fixed Gateway runtime client. Set the existing
@@ -40,7 +42,7 @@ endpoints:
       deny:
         - mcp:agentcore_governance:delete_demo_asset
         - delete_demo_asset_mcp_agentcore_governance
-      reason: "ASK - Review {tool}. The parameters below are a synthetic demo request: blank ticket is valid in dev. Reject = no MCP call and no state change. Approve checks the retained AgentCore Gateway first; only Gateway ALLOW records one harmless local marker. No AWS mutation or secret access."
+      reason: "ASK - Review {tool}. The parameters below target one fixed unattached demo Security Group: blank ticket is valid in dev. Reject = no MCP call and no AWS change. Approve checks the retained AgentCore Gateway first; only Gateway ALLOW revokes exact TCP/22 from 0.0.0.0/0 and verifies COMPLIANT. No generic AWS mutation or secret access."
       hooks:
         - matcher: mcp:agentcore_governance:apply_demo_remediation
           module: /absolute/path/to/AgentCore/integration/librechat-governance/approval-hook.cjs
@@ -65,5 +67,5 @@ interface:
     public: false
 
 # Mongo is LibreChat's primary-database checkpointer and is required for a
-# retained approval/resume demo. The controlled action remains synthetic; the
-# fixed Security Group check is a real read-only AWS query.
+# retained approval/resume demo. The controlled action is restricted to one
+# exact ingress revoke; the fixed Security Group check is a real AWS query.

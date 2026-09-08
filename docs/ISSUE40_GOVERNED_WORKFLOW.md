@@ -13,7 +13,7 @@ LibreChat Agent
   -> native ALLOW or ASK policy
   -> agentcore_governance MCP server
   -> fixed retained Gateway MCP client (controlled action only)
-  -> local demo-state marker (only after Gateway ALLOW)
+  -> exact fixed Security Group revoke and provider re-read (only after Gateway ALLOW)
 ```
 
 - `check_security_finding(web-01)` is **ALLOW**. It reads only the fixed,
@@ -24,10 +24,11 @@ LibreChat Agent
   text.
 - `apply_demo_remediation(web-01, dev)` is **ASK**. Native LibreChat **Reject**
   means the MCP server is never called. After **Approve**, the server requires
-  the retained Gateway verifier to report `ALLOW` before it writes exactly one
-  local marker.
+  the retained Gateway verifier to report `ALLOW` before it revokes only
+  TCP/22 from `0.0.0.0/0` on the fixed dedicated demo Security Group and
+  immediately verifies `COMPLIANT` with the same provider read.
 - `apply_demo_remediation(web-01, prod, DEMO-123)` may pass the UI ticket hook,
-  but the retained Gateway must return `DENY`; no marker is written.
+  but the retained Gateway must return `DENY`; no AWS action is called.
 - `delete_demo_asset(web-01)` remains **DENY** in LibreChat and has no local
   delete implementation.
 
@@ -58,6 +59,7 @@ private deployment configuration:
 
 ```text
 GOVERNANCE_AWS_READ_ENABLED=required
+GOVERNANCE_AWS_REMEDIATION_ENABLED=required
 GOVERNANCE_AWS_REGION=ap-southeast-1
 GOVERNANCE_SECURITY_GROUP_ID=sg-<dedicated-demo-group>
 GOVERNANCE_GATEWAY_POLICY_ENABLED=required
@@ -65,15 +67,15 @@ GOVERNANCE_GATEWAY_URL=https://<existing-gateway>.gateway.bedrock-agentcore.ap-s
 ```
 
 The MCP runtime uses the LibreChat EC2 instance role; it never receives or
-copies the `amit` profile. That role needs only the read-only
-`ec2:DescribeSecurityGroups` permission required for the fixed demo Security
-Group. AWS defines that API as a List action without a resource type, so its
-IAM statement must use `Resource: "*"`; the MCP server still queries only its
-fixed private demo Group ID. The existing Gateway Cedar policy must grant that
+copies the `amit` profile. That role needs read-only `ec2:DescribeSecurityGroups`
+(`Resource: "*"` because it is an EC2 List action) and
+`ec2:RevokeSecurityGroupIngress` restricted to the fixed dedicated demo
+Security Group resource. The MCP server still hard-binds both operations to
+its private Group ID and exact TCP/22-from-0.0.0.0/0 permission. The existing Gateway Cedar policy must grant that
 specific role only the fixed `check_demo_scope` action in `dev`; `prod` remains
 default-deny. If any prerequisite, role authorization, retained resource, or
-expected response is missing, the MCP response is **BLOCKED** and records no
-local effect. `BLOCKED` is a safe operational result, not an AWS success.
+expected response is missing, the MCP response is **BLOCKED** and does not make
+an unverified success claim. `BLOCKED` is a safe operational result, not an AWS success.
 
 The EC2 role also needs the single IAM transport permission
 `bedrock-agentcore:InvokeGateway` on that retained Gateway. This grants no

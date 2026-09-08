@@ -5,9 +5,9 @@
 Build a small, understandable internal AI platform POC following `ROADMAP.md`.
 Follow KISS and optimize for a 3-5 minute demo.
 
-The active implementation milestone is Issue #46: replace the synthetic
-read-only security finding with one real AWS security/compliance signal while
-reusing the merged M1-M7 platform and demo path.
+The active implementation milestone is Issue #46: complete one real AWS
+Security Group governance lifecycle while reusing the merged M1-M7 platform
+and demo path.
 
 ## Scope
 
@@ -16,10 +16,12 @@ reusing the merged M1-M7 platform and demo path.
   and validation paths before adding another framework.
 - Reuse the merged M1-M7 governed workflow and final demo rather than rebuilding
   approval, Gateway Policy, audit, developer-client, or controlled-action plumbing.
-- Issue #46 should choose exactly one already-available read-only AWS security
-  source and show a small sanitized result through the existing LibreChat path.
-- Keep the controlled remediation harmless/local for this milestone; do not turn
-  this into a real remediation engine yet.
+- Issue #46 uses one fixed, dedicated, unattached demo Security Group. It may
+  read that Group and, only after native approval plus Gateway ALLOW, revoke
+  the single exact TCP/22-from-0.0.0.0/0 ingress rule and verify the result.
+- Do not turn this into a generic Security Group mutation capability, accept a
+  caller-selected resource/rule, or change any instance, ENI, route, public IP,
+  or workload.
 - An active Amit-approved Issue, PR, goal, task, or milestone authorizes the
   normal scoped AWS, IAM, configuration, deployment, service-restart, and
   validation changes needed to complete it. Do not request a second approval
