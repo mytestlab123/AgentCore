@@ -1,10 +1,10 @@
 # AgentCore Test Proof
 
-Last verified: 8 September 2026, 18:49 SGT
+Last verified: 8 September 2026, 18:55 SGT
 
 ## Issue #46 real Security Group SSH signal — live host proof
 
-Last verified: 8 September 2026, 18:49 SGT
+Last verified: 8 September 2026, 18:55 SGT
 
 The deployed LibreChat MCP source was updated to PR #47 commit `712eab3` and
 the verified LibreChat process group was restarted cleanly. The dedicated demo
@@ -33,6 +33,14 @@ LibreChat-browser click proof. The repository browser runner tests only
 loopback-owned portal/Gateway applications and does not automate the separate
 authenticated LibreChat session. Manual native UI acceptance remains required
 for the visible Agent tool result.
+
+An additional isolated **Playwright Core** run against the deployed LibreChat
+URL returned HTTP `200` and reached `/login` (`AUTHENTICATION_BOUNDARY`). It
+did not reuse Amit's browser profile, cookie, or credentials; it therefore
+correctly did not see the Agent UI. The temporary Chrome profile and DevTools
+port were both removed after the run. Private evidence:
+
+`/home/user/.AGENTS-temp/AgentCore/librechat-playwright-e2e.B1HQaI/evidence/`
 
 ## Issue #44 compact Security Copilot audit — live backend proof
 
