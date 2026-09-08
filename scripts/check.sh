@@ -30,6 +30,7 @@ AWS_PROFILE=amit ISSUE12_REGION=us-east-2 \
 "$repo_dir/scripts/test-codex-bedrock-smoke.sh"
 "$repo_dir/scripts/test-harness-mvp.sh"
 python3 "$repo_dir/integration/librechat-governance/test_governance.py"
+PYTHONPATH="$repo_dir/scripts" python3 "$repo_dir/scripts/test_gateway_policy_poc.py"
 if rg -n 'localStorage|sessionStorage|indexedDB' \
   "$repo_dir/frontend/src/issue9-api.ts" "$repo_dir/frontend/src/issue9-pages.tsx"; then
   echo 'NO-GO: credential UI must not use browser persistence.' >&2

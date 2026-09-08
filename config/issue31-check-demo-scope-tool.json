@@ -1,0 +1,17 @@
+[
+  {
+    "name": "check_demo_scope",
+    "description": "Return one fixed synthetic health result for dev or prod",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "environment": {
+          "type": "string",
+          "description": "Exact demo environment: dev or prod",
+          "enum": ["dev", "prod"]
+        }
+      },
+      "required": ["environment"]
+    }
+  }
+]
