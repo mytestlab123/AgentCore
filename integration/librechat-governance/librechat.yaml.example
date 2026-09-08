@@ -9,6 +9,14 @@ mcpServers:
       - /absolute/path/to/AgentCore/integration/librechat-governance/demo_mcp_server.py
     env:
       GOVERNANCE_STATE_FILE: /absolute/path/to/private/agentcore-governance/state.json
+      # Enables one fixed, sanitized `sts:GetCallerIdentity` read. Credentials
+      # and expected Gateway identity hashes stay in the private host runtime.
+      GOVERNANCE_AWS_READ_ENABLED: required
+      GOVERNANCE_AWS_REGION: ap-southeast-1
+      # Enables the packaged, fixed Gateway runtime client. Set the existing
+      # managed Gateway endpoint only in private deployment configuration.
+      GOVERNANCE_GATEWAY_POLICY_ENABLED: required
+      GOVERNANCE_GATEWAY_URL: https://gateway-id.gateway.bedrock-agentcore.ap-southeast-1.amazonaws.com
     chatMenu: false
 
 endpoints:
@@ -31,7 +39,7 @@ endpoints:
       deny:
         - mcp:agentcore_governance:delete_demo_asset
         - delete_demo_asset_mcp_agentcore_governance
-      reason: "ASK - Review {tool}. The parameters below are a synthetic demo request: blank ticket is valid in dev. Approve = one harmless local marker, no AWS or secret access. Reject = no MCP call and no state change."
+      reason: "ASK - Review {tool}. The parameters below are a synthetic demo request: blank ticket is valid in dev. Reject = no MCP call and no state change. Approve checks the retained AgentCore Gateway first; only Gateway ALLOW records one harmless local marker. No AWS mutation or secret access."
       hooks:
         - matcher: mcp:agentcore_governance:apply_demo_remediation
           module: /absolute/path/to/AgentCore/integration/librechat-governance/approval-hook.cjs
