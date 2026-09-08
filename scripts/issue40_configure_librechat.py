@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Replace only the known agentcore_governance MCP block in LibreChat YAML.
+"""Replace the known governance MCP block and its approval explanation.
 
 This deployment helper receives all host-specific paths and the retained
 Gateway endpoint at runtime. It does not print those values or write them into
 the repository. Before the first change it creates a mode-600 sibling backup;
 the replacement is atomic and refuses an MCP entry with unknown top-level
-settings rather than risk deleting deployment-owned configuration.
+settings rather than risk deleting deployment-owned configuration. If the
+governed approval block is present, it replaces only its `reason` line.
 """
 
 from __future__ import annotations
@@ -23,6 +24,12 @@ REGION = "ap-southeast-1"
 URL_SUFFIX = f".gateway.bedrock-agentcore.{REGION}.amazonaws.com"
 SECURITY_GROUP_ID_PATTERN = re.compile(r"^sg-[0-9a-f]{8}(?:[0-9a-f]{9})?$")
 ALLOWED_TOP_LEVEL = {"command", "args", "env", "chatMenu"}
+APPROVAL_REASON = (
+    "ASK - Review {tool}. The parameters below target one fixed unattached demo Security Group: "
+    "blank ticket is valid in dev. Reject = no MCP call and no AWS change. Approve checks the "
+    "retained AgentCore Gateway first; only Gateway ALLOW revokes exact TCP/22 from 0.0.0.0/0 "
+    "and verifies COMPLIANT. No generic AWS mutation or secret access."
+)
 
 
 class ConfigureBlocked(RuntimeError):
@@ -90,6 +97,52 @@ def known_top_level_fields(lines: list[str], start: int, end: int, server_indent
     return fields
 
 
+def find_child_block(
+    lines: list[str], *, start: int, end: int, indent: int, name: str,
+) -> tuple[int, int] | None:
+    """Return a direct YAML mapping child and its indented extent, if present."""
+    for index in range(start + 1, end):
+        if indent_width(lines[index]) == indent and lines[index].strip() == f"{name}:":
+            child_end = next(
+                (candidate for candidate in range(index + 1, end)
+                 if lines[candidate] and indent_width(lines[candidate]) <= indent),
+                end,
+            )
+            return index, child_end
+    return None
+
+
+def replace_governance_approval_reason(lines: list[str]) -> list[str]:
+    """Replace only the existing governed approval reason; preserve all other policy."""
+    endpoints = next(
+        (index for index, line in enumerate(lines)
+         if line.strip() == "endpoints:" and indent_width(line) == 0),
+        None,
+    )
+    if endpoints is None:
+        return lines
+    endpoints_end = next(
+        (index for index in range(endpoints + 1, len(lines))
+         if lines[index] and indent_width(lines[index]) == 0),
+        len(lines),
+    )
+    agents = find_child_block(lines, start=endpoints, end=endpoints_end, indent=2, name="agents")
+    if agents is None:
+        return lines
+    tool_approval = find_child_block(
+        lines, start=agents[0], end=agents[1], indent=4, name="toolApproval")
+    if tool_approval is None:
+        return lines
+    reason_indexes = [
+        index for index in range(tool_approval[0] + 1, tool_approval[1])
+        if indent_width(lines[index]) == 6 and lines[index].lstrip().startswith("reason:")
+    ]
+    if len(reason_indexes) != 1:
+        raise ConfigureBlocked("governed toolApproval reason is missing or ambiguous")
+    reason_index = reason_indexes[0]
+    return lines[:reason_index] + [f'      reason: "{APPROVAL_REASON}"\n'] + lines[reason_index + 1:]
+
+
 def render_block(
     *, indent: int, server_dir: Path, state_file: Path, gateway_url: str, security_group_id: str,
 ) -> list[str]:
@@ -146,7 +199,8 @@ def configure(*, config: Path, server_dir: Path, state_file: Path, gateway_url: 
         indent=indent, server_dir=server_dir, state_file=state_file, gateway_url=gateway_url,
         security_group_id=security_group_id,
     )
-    updated = "".join(lines[:start] + replacement + lines[end:])
+    updated_lines = lines[:start] + replacement + lines[end:]
+    updated = "".join(replace_governance_approval_reason(updated_lines))
     if updated == original:
         return
     backup_once(config, original)
