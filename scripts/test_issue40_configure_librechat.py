@@ -31,6 +31,7 @@ class Issue40ConfigureLibreChatTests(unittest.TestCase):
             self.assertIn("GOVERNANCE_GATEWAY_POLICY_ENABLED: required", updated)
             self.assertIn("GOVERNANCE_GATEWAY_URL: " + GATEWAY_URL, updated)
             self.assertIn("GOVERNANCE_SECURITY_GROUP_ID: " + SECURITY_GROUP_ID, updated)
+            self.assertIn("GOVERNANCE_AWS_REMEDIATION_ENABLED: required", updated)
             self.assertIn("endpoints:\n  agents:", updated)
             self.assertEqual(config.with_name("librechat.yaml.issue40-before-gateway.bak").read_text(), SOURCE)
 

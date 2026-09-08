@@ -104,6 +104,7 @@ def render_block(
         f"{nested}env:\n",
         f"{value}GOVERNANCE_STATE_FILE: {state_file}\n",
         f"{value}GOVERNANCE_AWS_READ_ENABLED: required\n",
+        f"{value}GOVERNANCE_AWS_REMEDIATION_ENABLED: required\n",
         f"{value}GOVERNANCE_AWS_REGION: {REGION}\n",
         f"{value}GOVERNANCE_SECURITY_GROUP_ID: {security_group_id}\n",
         f"{value}GOVERNANCE_GATEWAY_POLICY_ENABLED: required\n",
