@@ -53,6 +53,49 @@ try {
     }
   });
 
+  await page.goto(appUrl, { waitUntil: 'domcontentloaded', timeout: 15_000 });
+  const gatewayVisualMode = await page.getByTestId('gateway-visual-demo').isVisible().catch(() => false);
+  if (gatewayVisualMode) {
+    const forbidden = /arn:|https?:\/\/|\b\d{12}\b|access.?key|secret|session.?token|gatewayurl|policyengine|resourceid|caller/i;
+    const allowButton = page.getByTestId('run-allow');
+    await allowButton.click();
+    const allowResult = page.getByTestId('allow-result');
+    await allowResult.filter({ hasText: 'ALLOW' }).waitFor({ timeout: 360_000 });
+    const allowText = await allowResult.innerText();
+    assert(allowText.includes('ALLOW'), 'ALLOW decision was not visible');
+    assert(allowText.includes('BACKEND DELTA 1'), 'ALLOW backend delta was not exactly one');
+    assert(allowText.includes('RETAINED COST GATE PASS'), 'ALLOW retained-cost gate was not visible');
+    assert(allowText.includes('NO INFRASTRUCTURE MUTATION'), 'ALLOW mutation boundary was not visible');
+    await page.screenshot({ path: path.join(evidenceDir, 'gateway-allow.png'), fullPage: false });
+
+    const denyButton = page.getByTestId('run-deny');
+    await denyButton.click();
+    const denyResult = page.getByTestId('deny-result');
+    await denyResult.filter({ hasText: 'DENY' }).waitFor({ timeout: 360_000 });
+    const denyText = await denyResult.innerText();
+    assert(denyText.includes('DENY'), 'DENY decision was not visible');
+    assert(denyText.includes('BACKEND DELTA 0'), 'DENY backend delta was not exactly zero');
+    assert(denyText.includes('backend was not invoked'), 'DENY backend boundary was not visible');
+    assert(denyText.includes('NO INFRASTRUCTURE MUTATION'), 'DENY mutation boundary was not visible');
+    await page.getByTestId('overall-result').filter({ hasText: 'GATEWAY_VISUAL_RESULT=PASS' }).waitFor({ timeout: 15_000 });
+    const pageText = await page.locator('body').innerText();
+    assert(!forbidden.test(pageText), 'Visual page exposed a private identifier or secret-like value');
+    await page.screenshot({ path: path.join(evidenceDir, 'gateway-deny.png'), fullPage: false });
+    routeResults.push({ name: 'Gateway visual demo', passed: true });
+    await saveJson('routes.json', routeResults);
+    await saveJson('network.json', networkRequests);
+    await saveJson('console-errors.json', consoleErrors);
+    assert(externalRequests.length === 0, 'The visual demo made a non-loopback browser request');
+    assert(consoleErrors.length === 0, 'Browser console or page errors were detected');
+    await saveJson('result.json', {
+      status: 'PASS', appUrl, startedAt, finishedAt: new Date().toISOString(),
+      viewport: { width: 1920, height: 1080 }, routesChecked: routeResults.length,
+      mode: 'GATEWAY_VISUAL', allowDecision: 'ALLOW', allowBackendDelta: 1,
+      denyDecision: 'DENY', denyBackendDelta: 0, retainedCostGate: 'PASS',
+      infrastructureMutation: 0, gatewayVisualResult: 'PASS',
+      browserReceivedAwsSecret: false, externalRequests: 0, consoleErrors: 0,
+    });
+  } else {
   await page.goto(routeUrl('#/'), { waitUntil: 'domcontentloaded', timeout: 15_000 });
   const issue9Mode = await page.getByTestId('issue9-proof').isVisible().catch(() => false);
   const routes = issue9Mode ? [
@@ -192,6 +235,7 @@ try {
     browserReceivedAwsSecret: false, externalRequests: 0, consoleErrors: 0,
     cloudTrailStatus,
   });
+  }
 } catch (error) {
   if (page) await page.screenshot({ path: path.join(evidenceDir, 'failure.png'), fullPage: false }).catch(() => {});
   await saveJson('routes.json', routeResults);

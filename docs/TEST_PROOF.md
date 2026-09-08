@@ -2,6 +2,47 @@
 
 Last verified: 1 September 2026, 00:09 SGT
 
+## Issue #38 Gateway Policy visual demo
+
+Last verified: 8 September 2026, 11:53 SGT
+
+The retained native AgentCore Gateway proof was exercised through a deliberately
+small loopback-only visual page. The page has exactly two fixed buttons; it
+accepts no free-form input and never receives a credential, ARN, Gateway URL,
+account ID, identity hash, policy response, or raw AWS response.
+
+```text
+APP_URL=http://127.0.0.1:3334/ ./scripts/browser-e2e.sh
+```
+
+Result: **PASS**.
+
+| Fixed browser action | Visible result | Server-side proof |
+| --- | --- | --- |
+| `ALLOW: dev` | `ALLOW`, backend delta `1` | One Gateway invocation and one bounded backend metric increment |
+| `DENY: prod` | `DENY`, backend delta `0`, backend not invoked | Gateway policy denial; two bounded metric observations remain zero |
+
+The retained-cost gate passed, infrastructure mutation was `0`, and the final
+page result was `GATEWAY_VISUAL_RESULT=PASS`. Browser checks also recorded zero
+external requests, zero console errors, and no AWS secret exposure. No AWS
+resource was created, updated, deployed, bootstrapped, deleted, or cleaned up.
+
+Private evidence:
+
+`/home/user/.AGENTS-temp/AgentCore/browser-e2e/20260908T114806+0800/`
+
+Windows review copies:
+
+- `C:\\Users\\ISSUser\\Downloads\\output\\AgentCore\\gateway-allow.png`
+- `C:\\Users\\ISSUser\\Downloads\\output\\AgentCore\\gateway-deny.png`
+- `C:\\Users\\ISSUser\\Downloads\\output\\AgentCore\\browser-e2e-result.json`
+
+Proof boundary: the screenshots prove the visible local UI and its browser
+network boundary. The signed Gateway invocation and bounded Lambda metric
+queries occur only in the loopback server; their sanitized, fixed results are
+what the page displays. This is a retained-resource validation, not a claim
+that a browser can directly inspect AWS policy internals.
+
 ## Issue #34 Gateway proof-integrity validation
 
 Last verified: 8 September 2026, 09:46 SGT

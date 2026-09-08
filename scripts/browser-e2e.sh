@@ -189,19 +189,30 @@ expected_api_base_url=${EXPECTED_API_BASE_URL:-}
 cleanup
 trap - EXIT INT TERM
 
-jq -e '.status == "PASS" and .routesChecked == 3 and .keyCreatedThenMasked and .externalRequests == 0 and .consoleErrors == 0' \
+jq -e '.status == "PASS" and .externalRequests == 0 and .consoleErrors == 0' \
   "$evidence_dir/result.json" >/dev/null
 jq -e '.chrome_stopped and .profile_removed and .debug_port_released' \
   "$evidence_dir/cleanup.json" >/dev/null
-test -s "$evidence_dir/playground-allowed.png"
-test -s "$evidence_dir/playground-denied.png"
-test -s "$evidence_dir/logs-allowed-denied.png"
 
 review_dir=${REVIEW_DIR:-$windows_user_wsl/Downloads/output/AgentCore}
 install -d "$review_dir"
-install -m 644 "$evidence_dir/playground-allowed.png" "$review_dir/playground-allowed.png"
-install -m 644 "$evidence_dir/playground-denied.png" "$review_dir/playground-denied.png"
-install -m 644 "$evidence_dir/logs-allowed-denied.png" "$review_dir/logs-allowed-denied.png"
+e2e_mode=$(jq -r '.mode' "$evidence_dir/result.json")
+if [[ $e2e_mode == GATEWAY_VISUAL ]]; then
+  jq -e '.routesChecked == 1 and .allowDecision == "ALLOW" and .allowBackendDelta == 1 and .denyDecision == "DENY" and .denyBackendDelta == 0 and .retainedCostGate == "PASS" and .infrastructureMutation == 0 and .gatewayVisualResult == "PASS" and .browserReceivedAwsSecret == false' \
+    "$evidence_dir/result.json" >/dev/null
+  test -s "$evidence_dir/gateway-allow.png"
+  test -s "$evidence_dir/gateway-deny.png"
+  install -m 644 "$evidence_dir/gateway-allow.png" "$review_dir/gateway-allow.png"
+  install -m 644 "$evidence_dir/gateway-deny.png" "$review_dir/gateway-deny.png"
+else
+  jq -e '.routesChecked == 3 and .keyCreatedThenMasked' "$evidence_dir/result.json" >/dev/null
+  test -s "$evidence_dir/playground-allowed.png"
+  test -s "$evidence_dir/playground-denied.png"
+  test -s "$evidence_dir/logs-allowed-denied.png"
+  install -m 644 "$evidence_dir/playground-allowed.png" "$review_dir/playground-allowed.png"
+  install -m 644 "$evidence_dir/playground-denied.png" "$review_dir/playground-denied.png"
+  install -m 644 "$evidence_dir/logs-allowed-denied.png" "$review_dir/logs-allowed-denied.png"
+fi
 install -m 644 "$evidence_dir/result.json" "$review_dir/browser-e2e-result.json"
 
 printf 'PASS: AgentCore browser E2E\n'
