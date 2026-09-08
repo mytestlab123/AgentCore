@@ -39,6 +39,15 @@ native `ASK` card; **Approve** + **Submit** returned verified `COMPLIANT`; and
 the subsequent real read returned `COMPLIANT`. The operator-only reset was then
 run again and verified the intended repeatable `NON_COMPLIANT` starting state.
 
+The initial native ASK card used stale Issue #24 wording that incorrectly
+described a harmless local effect. The actual M8 backend action was nevertheless
+the exact verified Security Group revoke described above. PR #47 commit
+`d75b63f` corrected the deployed sole `toolApproval.reason`; the host verified
+the exact AWS-revoke wording and public LibreChat returned HTTP `200` after a
+controlled restart. One fresh native **Reject** card remains the smallest
+visible confirmation that the refreshed browser receives the corrected copy;
+Reject does not invoke MCP or change AWS state.
+
 Proof boundary: the native card is user-observed authenticated UI evidence. The
 repository browser runner tests only loopback-owned portal/Gateway applications
 and does not automate a separate authenticated LibreChat session.
