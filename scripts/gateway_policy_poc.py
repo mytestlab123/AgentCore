@@ -691,6 +691,41 @@ def prove_deltas(aws, gateway):
     return evidence
 
 
+def prove_fixed_action(aws, gateway, environment):
+    """Invoke one fixed Gateway case and verify its bounded Lambda delta.
+
+    This is deliberately read/invoke-only: it never creates, repairs, deploys,
+    updates, or deletes any retained resource.
+    """
+    validate_case(TOOL_NAME, environment)
+    samples = []
+    start = quiet_metric_boundary(aws, samples)
+    code, body = invoke_gateway(aws, gateway["gatewayUrl"], environment)
+    if environment == "dev":
+        parse_dev_response(code, body)
+        delta = wait_for_metric(aws, start, 1, samples)
+        if delta != 1:
+            raise Blocked("dev backend delta is not exactly one")
+    else:
+        parse_prod_response(code, body)
+        minimum_observation = datetime.now(timezone.utc) + timedelta(seconds=120)
+        if datetime.now(timezone.utc) < minimum_observation:
+            time.sleep((minimum_observation - datetime.now(timezone.utc)).total_seconds())
+        delta = wait_for_metric(aws, start, 0, samples, stable_samples=2)
+        if delta != 0:
+            raise Blocked("prod backend delta is not exactly zero")
+    evidence = {
+        "environment": environment,
+        "proof_started": start.isoformat(),
+        "proof_finished": datetime.now(timezone.utc).isoformat(),
+        "backend_delta": delta,
+        "metric_samples": samples,
+        "response": json.loads(body),
+    }
+    write_private_json(aws.private_dir / f"visual-{environment}-evidence.json", evidence)
+    return evidence
+
+
 def stack_resources(aws, stack_name):
     stack = aws.call("cloudformation", "describe-stacks", {"StackName": stack_name})
     items = aws.call("cloudformation", "describe-stack-resources", {"StackName": stack_name})
@@ -861,6 +896,20 @@ def live_context():
     identity = require_live_gates(aws)
     validate_cost(KMS_KEY_MONTHLY_USD + OTHER_IDLE_BUFFER_USD)
     return private_dir, aws, identity
+
+
+def retained_live_context():
+    """Read and verify the retained proof topology without any repair path."""
+    private_dir, aws, identity = live_context()
+    project = private_dir / "Issue31Policy" / "agentcore"
+    if not project.is_dir():
+        raise Blocked("retained native AgentCore project is unavailable")
+    function = aws.call("lambda", "get-function", {"FunctionName": FUNCTION_NAME})
+    lambda_arn = function.get("Configuration", {}).get("FunctionArn")
+    if not lambda_arn:
+        raise Blocked("retained synthetic Lambda ARN is unavailable")
+    gateway, cost = inventory_and_cost(aws, project, lambda_arn, identity)
+    return aws, gateway, cost
 
 
 def prepare_live():
