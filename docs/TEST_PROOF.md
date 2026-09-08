@@ -1,6 +1,31 @@
 # AgentCore Test Proof
 
-Last verified: 1 September 2026, 00:09 SGT
+Last verified: 8 September 2026, 15:00 SGT
+
+## Issue #40 LibreChat native-approval browser boundary
+
+Last verified: 8 September 2026, 15:00 SGT
+
+The final browser check reused the repository's installed Playwright Core and
+Windows Chrome in a disposable, isolated browser profile. It opened the
+deployed LibreChat URL without using, reading, copying, or modifying Amit's
+existing browser profile.
+
+Result: **AUTHENTICATION BOUNDARY**. The fresh browser reached LibreChat's
+`/login` route. No login automation, account creation, cookie reuse, agent
+creation, tool call, approval click, or screenshot was attempted.
+
+Private evidence:
+
+`/home/user/.AGENTS-temp/AgentCore/librechat-browser-probe.fUgOUa/`
+
+Proof boundary: this proves only that the clean browser profile cannot reach
+the native agent interface without authentication. It does **not** prove the
+LibreChat ASK/Reject/Approve UI. The separately recorded live EC2 backend proof
+did establish STS read ALLOW, Gateway `dev` ALLOW with exactly one harmless
+local effect, and Gateway `prod` DENY with no additional effect.
+
+Manual native-UI acceptance is therefore required for this PR.
 
 ## Issue #38 Gateway Policy visual demo
 
