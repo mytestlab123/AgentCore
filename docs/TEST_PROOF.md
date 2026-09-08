@@ -1,10 +1,10 @@
 # AgentCore Test Proof
 
-Last verified: 8 September 2026, 22:07 SGT
+Last verified: 8 September 2026, 22:24 SGT
 
 ## Issue #46 real Security Group SSH signal — live host proof
 
-Last verified: 8 September 2026, 22:07 SGT
+Last verified: 8 September 2026, 22:24 SGT
 
 The deployed LibreChat MCP source was updated to PR #47 commit `40da67d`.
 The dedicated demo Security Group remains intentionally unattached and is reset
@@ -33,10 +33,13 @@ Group's exact TCP/22-from-`0.0.0.0/0` rule was revoked once after Gateway
 operator-only CLI reset. No instance, ENI attachment, route, public IP,
 workload, secret, or other Security Group rule changed.
 
-Proof boundary: this is a real deployed MCP/backend result. Amit's authenticated
-native LibreChat screenshot proves the read-only `ALLOW` card. The final
-remaining UI proof is one manual `Approve` + `Submit` of the dev remediation
-card, showing the exact AWS action and verified `COMPLIANT` state. The
+Native UI acceptance also passed in Amit's authenticated LibreChat session:
+the first real read returned `NON_COMPLIANT`; the `dev` remediation showed the
+native `ASK` card; **Approve** + **Submit** returned verified `COMPLIANT`; and
+the subsequent real read returned `COMPLIANT`. The operator-only reset was then
+run again and verified the intended repeatable `NON_COMPLIANT` starting state.
+
+Proof boundary: the native card is user-observed authenticated UI evidence. The
 repository browser runner tests only loopback-owned portal/Gateway applications
 and does not automate a separate authenticated LibreChat session.
 
