@@ -4,6 +4,7 @@
   "version": 1,
   "managedBy": "CDK",
   "tags": {
+    "Name": "agentcore-issue31-policy-proof",
     "agentcore:created-by": "agentcore-cli",
     "agentcore:project-name": "Issue31Policy",
     "owner": "amit",

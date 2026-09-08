@@ -7,7 +7,8 @@
       "properties": {
         "environment": {
           "type": "string",
-          "description": "Exact demo environment: dev or prod"
+          "description": "Exact demo environment: dev or prod",
+          "enum": ["dev", "prod"]
         }
       },
       "required": ["environment"]

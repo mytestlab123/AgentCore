@@ -20,6 +20,9 @@ AWS account IDs, ARNs, endpoint URLs, credentials, or raw deployment output.
 ## Native CLI configuration
 
 - Pin `@aws/agentcore` to an exact reviewed version and commit its lockfile.
+- CLI 0.28.1's dependency lock includes platform-specific esbuild packages as
+  non-optional entries. On Linux, use `npm ci --force --ignore-scripts` for
+  this isolated toolchain and verify the pinned CLI version afterward.
 - `agentcore.json` can explicitly use empty `runtimes` and `harnesses` arrays.
 - A Lambda target uses `targetType: lambdaFunctionArn`, `lambdaArn`, and
   `toolSchemaFile`.
@@ -51,6 +54,12 @@ AWS account IDs, ARNs, endpoint URLs, credentials, or raw deployment output.
   DENY with Lambda delta exactly zero.
 - Lambda metrics are backend-execution evidence; a policy response alone does
   not prove the backend was untouched.
+- Parse the complete MCP JSON-RPC envelope. An authentication error, a generic
+  error containing the word "denied", or a successful result mentioning that
+  word is not Gateway Policy DENY evidence.
+- Start proof metrics in a quiet minute, reject any count above the expected
+  value, observe after the denied request for the publication interval, and
+  retain timestamped metric samples privately.
 - Use stable tagged resources. A TTL/review date triggers owner review and does
   not itself authorize deletion.
 - Retain approved low-cost resources for repeatable demonstrations. Cleanup is

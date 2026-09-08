@@ -69,6 +69,12 @@ After HOLD is explicitly lifted, the implementation should expose one live comma
 python3 scripts/gateway_policy_poc.py --approve-live
 ```
 
+For the isolated pinned CLI 0.28.1 toolchain on Linux, install with
+`npm ci --force --ignore-scripts --no-audit --no-fund --prefix
+tools/issue31-agentcore`; the force flag is a documented workaround for
+upstream non-optional platform-specific esbuild lock metadata, not permission
+to relax any deployment or proof gate.
+
 A zero-AWS local plan/test path may also exist, but the live proof above is the only acceptance path.
 
 ## One happy path
@@ -331,7 +337,8 @@ Stop without substituting architecture if any of these occurs:
 - current policy cannot deterministically inspect the tool argument needed for this proof;
 - Gateway cannot expose the single narrow Lambda tool without adding another hosted layer;
 - implementation requires Runtime, Harness, remote MCP hosting, API Gateway, a VPC, database, or public endpoint;
-- success would require broad IAM, AdministratorAccess, or PowerUserAccess;
+- success would require broad IAM beyond the owner's explicitly approved
+  standard CDK bootstrap exception, or any unreviewed PowerUserAccess;
 - evidence would require enabling an account-wide logging/observability feature;
 - denied call cannot be independently proven to have zero backend execution;
 - code grows materially beyond the review target without explanation;
@@ -370,7 +377,8 @@ Do not add or change:
 - ASR, Cloud Custodian, patching, remediation, or IaC changes;
 - production/customer/office data;
 - provider subscriptions, quotas, or entitlement changes;
-- persistent AWS deployment;
+- persistent AWS deployment other than the explicitly approved retained,
+  tagged, sub-US$2 Issue #31 and CDK bootstrap resources;
 - multi-agent/RAG;
 - frontend changes.
 

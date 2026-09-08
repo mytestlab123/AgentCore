@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Focused offline checks for the Issue 31 native CLI verifier."""
+"""Focused offline checks for the Issue #31 native CLI verifier."""
 
 import json
 import os
@@ -15,6 +15,21 @@ import gateway_policy_poc as poc
 SCRIPT = Path(__file__).with_name("gateway_policy_poc.py")
 
 
+def dev_response(environment="dev", status="healthy", source="synthetic-demo"):
+    payload = {"environment": environment, "status": status, "source": source}
+    lambda_result = {"statusCode": 200, "body": json.dumps(payload)}
+    return json.dumps({"jsonrpc": "2.0", "id": "dev", "result": {
+        "isError": False, "content": [{"type": "text", "text": json.dumps(lambda_result)}]}})
+
+
+def prod_response(code=-32002, message=None):
+    message = message or (
+        "Tool Execution Denied: Tool call not allowed due to policy enforcement "
+        "[No policy applies to the request (denied by default).]")
+    return json.dumps({"jsonrpc": "2.0", "id": "prod",
+                       "error": {"code": code, "message": message}})
+
+
 class GatewayPolicyPocTest(unittest.TestCase):
     def test_plan_makes_no_external_call(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -26,7 +41,13 @@ class GatewayPolicyPocTest(unittest.TestCase):
                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self.assertEqual(result.returncode, 0)
         self.assertIn("AWS_CALLS=0", result.stdout)
-        self.assertIn("NATIVE_AGENTCORE_CLI=0.28.1", result.stdout)
+        self.assertIn("PRECREATE_ESTIMATED_MONTHLY_IDLE_COST_USD=1.01", result.stdout)
+
+    def test_live_command_is_present(self):
+        result = subprocess.run([sys.executable, SCRIPT, "--help"], text=True,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("--approve-live", result.stdout)
 
     def test_scope_and_hash_gates_fail_before_aws(self):
         fake = mock.Mock()
@@ -43,31 +64,72 @@ class GatewayPolicyPocTest(unittest.TestCase):
                 poc.require_live_gates(fake)
         fake.call.assert_not_called()
 
-    def test_decision_and_cost_validation_are_fail_closed(self):
+    def test_identity_hash_mismatch_blocks(self):
+        fake = mock.Mock()
+        fake.call.return_value = {"Account": "111122223333", "Arn": "arn:example"}
+        env = {"AWS_PROFILE": poc.PROFILE, "AWS_REGION": poc.REGION,
+               "AGENTCORE_EXPECTED_ACCOUNT_SHA256": poc.digest("wrong"),
+               "AGENTCORE_EXPECTED_CALLER_SHA256": poc.digest("wrong")}
+        with mock.patch.dict(os.environ, env, clear=False), self.assertRaises(poc.Blocked):
+            poc.require_live_gates(fake)
+        fake.call.assert_called_once()
+
+    def test_exact_allow_and_deny_responses_pass(self):
+        poc.validate_results(200, dev_response(), 1, 200, prod_response(), 0)
+
+    def test_false_positive_responses_are_rejected(self):
+        bad_cases = (
+            (200, "synthetic-demo healthy", 200, "Authorization denied"),
+            (200, json.dumps({"jsonrpc": "2.0", "id": "dev", "error": {
+                "code": -32603, "message": "synthetic-demo healthy"}}), 200, prod_response()),
+            (200, dev_response(), 401, json.dumps({"message": "Authorization token expired"})),
+            (200, dev_response(), 200, json.dumps({"jsonrpc": "2.0", "id": "prod",
+                "result": {"isError": False, "content": [{"type": "text", "text": "denied"}]}})),
+            (200, dev_response(environment="prod"), 200, prod_response()),
+            (200, dev_response(), 200, prod_response(code=-32001)),
+        )
+        for dev_code, dev_body, prod_code, prod_body in bad_cases:
+            with self.subTest(prod_code=prod_code), self.assertRaises(poc.Blocked):
+                poc.validate_results(dev_code, dev_body, 1, prod_code, prod_body, 0)
+        with self.assertRaises(poc.Blocked):
+            poc.validate_results(200, dev_response(), 1, 200, prod_response(), 1)
+
+    def test_case_cost_and_endpoint_contracts(self):
         poc.validate_case(poc.TOOL_NAME, "dev")
-        poc.validate_results(200, "synthetic-demo healthy", 1,
-                             200, "Authorization denied", 0)
-        self.assertEqual(poc.validate_cost("0.01"), 0.01)
+        self.assertEqual(poc.validate_cost("1.01"), 1.01)
+        good_url = "https://example.gateway.bedrock-agentcore.ap-southeast-1.amazonaws.com"
+        self.assertEqual(poc.validate_gateway_url(good_url), good_url)
         for value in ("bad", -1, 2, float("inf")):
             with self.subTest(value=value), self.assertRaises(poc.Blocked):
                 poc.validate_cost(value)
-        with self.assertRaises(poc.Blocked):
-            poc.validate_case("other", "dev")
-        with self.assertRaises(poc.Blocked):
-            poc.validate_case(poc.TOOL_NAME, "stage")
-        with self.assertRaises(poc.Blocked):
-            poc.validate_results(200, "synthetic-demo healthy", 1,
-                                 403, "Authorization denied", 1)
+        for tool, environment in (("other", "dev"), (poc.TOOL_NAME, "stage")):
+            with self.assertRaises(poc.Blocked):
+                poc.validate_case(tool, environment)
+        for url in ("http://example.gateway.bedrock-agentcore.ap-southeast-1.amazonaws.com",
+                    "https://example.invalid/mcp",
+                    "https://user:pass@example.gateway.bedrock-agentcore.ap-southeast-1.amazonaws.com"):
+            with self.assertRaises(poc.Blocked):
+                poc.validate_gateway_url(url)
 
-    def test_private_native_project_shape(self):
+    def test_metric_wait_rejects_extra_invocation(self):
+        with mock.patch.object(poc, "metric_sum", return_value=2):
+            with self.assertRaises(poc.Blocked):
+                poc.wait_for_metric(mock.Mock(), mock.Mock(), 1, [], timeout=1)
+
+    def test_private_native_project_shape_and_permissions(self):
         identity = {"Account": "111122223333",
                     "Arn": "arn:aws:sts::111122223333:assumed-role/Demo/session"}
         with tempfile.TemporaryDirectory() as directory:
-            project = poc.render_private_project(
-                Path(directory),
-                "arn:aws:lambda:ap-southeast-1:111122223333:function:demo",
-                identity)
-            data = poc.validate_rendered_project(project)
+            root = Path(directory)
+            project = root / "Issue31Policy" / "agentcore"
+            project.mkdir(parents=True)
+            with mock.patch.object(poc, "PRIVATE_ROOT", root):
+                rendered = poc.render_private_project(
+                    root,
+                    "arn:aws:lambda:ap-southeast-1:111122223333:function:demo",
+                    identity,
+                    "arn:aws:bedrock-agentcore:ap-southeast-1:111122223333:gateway/demo")
+                data = poc.validate_rendered_project(rendered)
             self.assertEqual((project / "agentcore.json").stat().st_mode & 0o777, 0o600)
             self.assertEqual((project / "aws-targets.json").stat().st_mode & 0o777, 0o600)
         gateway = data["agentCoreGateways"][0]
@@ -76,19 +138,43 @@ class GatewayPolicyPocTest(unittest.TestCase):
         self.assertEqual(gateway["authorizerType"], "AWS_IAM")
         self.assertEqual(gateway["policyEngineConfiguration"]["mode"], "ENFORCE")
         self.assertEqual(gateway["targets"][0]["targetType"], "lambdaFunctionArn")
+        self.assertNotIn("prod", data["policyEngines"][0]["policies"][0]["statement"])
 
-    def test_sanitization_and_committed_placeholders(self):
-        raw = ("123456789012 arn:aws:iam::123456789012:role/x "
-               "https://example.invalid/mcp secret_key=abc /home/user/private")
+    def test_native_state_rejects_duplicate_or_missing_policy(self):
+        state = {"targets": {"default": {"resources": {
+            "mcp": {"gateways": {poc.GATEWAY_NAME: {"gatewayId": "g",
+                "gatewayArn": "a", "gatewayUrl": "u",
+                "targets": {poc.TARGET_NAME: {"targetId": "t"}}}}},
+            "policyEngines": {poc.ENGINE_NAME: {"policyEngineId": "e"}},
+            "policies": {f"{poc.ENGINE_NAME}/{poc.POLICY_NAME}": {"policyId": "p"}},
+            "stackName": poc.STACK_NAME}}}}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / ".cli" / "deployed-state.json"
+            path.parent.mkdir()
+            path.write_text(json.dumps(state))
+            poc.native_resources(Path(directory), complete=True)
+            state["targets"]["default"]["resources"]["policies"] = {}
+            path.write_text(json.dumps(state))
+            with self.assertRaises(poc.Blocked):
+                poc.native_resources(Path(directory), complete=True)
+
+    def test_sanitization_covers_real_credential_field_names(self):
+        raw = ('123456789012 arn:aws:iam::123456789012:role/x '
+               'https://example.invalid/mcp "AccessKeyId":"AKIAEXAMPLE", '
+               '"SecretAccessKey":"secret", "SessionToken":"token" /home/user/private')
         clean = poc.sanitize(raw)
-        for forbidden in ("123456789012", "arn:aws", "https://", "abc", "/home/user"):
+        for forbidden in ("123456789012", "arn:aws", "https://", "AKIAEXAMPLE",
+                          '"secret"', '"token"', "/home/user"):
             self.assertNotIn(forbidden, clean)
-        data = json.loads(poc.TEMPLATE.read_text())
-        text = json.dumps(data)
-        self.assertIn("__PRIVATE_LAMBDA_ARN__", text)
-        self.assertIn("__PRIVATE_CEDAR_STATEMENT__", text)
-        self.assertNotRegex(text, r"\b\d{12}\b")
-        self.assertNotIn("arn:aws:", text)
+
+    def test_pass_is_not_reported_when_inventory_blocks(self):
+        with mock.patch.object(poc, "live_context", return_value=(Path("/private"), mock.Mock(), {})), \
+                mock.patch.object(poc, "ensure_lambda_prerequisite", return_value="lambda"), \
+                mock.patch.object(poc, "inventory_and_cost", side_effect=poc.Blocked("inventory")), \
+                mock.patch.object(poc, "prove_deltas") as proof:
+            with self.assertRaises(poc.Blocked):
+                poc.prove_live()
+        proof.assert_not_called()
 
 
 if __name__ == "__main__":

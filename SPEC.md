@@ -82,6 +82,19 @@ AGENTCORE_EXPECTED_CALLER_SHA256=<approved-hash> \
 python3 scripts/gateway_policy_poc.py --approve-live
 ```
 
+The pinned upstream CLI dependency graph currently requires this Linux-safe
+installation command because its lock metadata includes platform-specific
+esbuild packages as non-optional entries:
+
+```bash
+npm ci --force --ignore-scripts --no-audit --no-fund \
+  --prefix tools/issue31-agentcore
+```
+
+The live command converges the retained native stack, validates its deployed
+state and ownership, records a bounded CloudWatch metric series, and repeats
+the inventory/cost check after the proof before printing PASS.
+
 Expected live result:
 
 ```text
