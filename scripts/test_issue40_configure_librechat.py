@@ -13,7 +13,7 @@ import issue40_configure_librechat as configure
 GATEWAY_URL = "https://example.gateway.bedrock-agentcore.ap-southeast-1.amazonaws.com"
 SECURITY_GROUP_ID = "sg-0123456789abcdef0"
 SOURCE = """version: 1.2.1\nmcpServers:\n  agentcore_governance:\n    command: /usr/bin/python3\n    args:\n      - /old/demo_mcp_server.py\n    env:\n      GOVERNANCE_STATE_FILE: /old/state.json\n    chatMenu: false\nendpoints:\n  agents:\n    disableBuilder: false\n"""
-SOURCE_WITH_LEGACY_APPROVAL = SOURCE + """    toolApproval:\n      enabled: true\n      ask:\n        - apply_demo_remediation_mcp_agentcore_governance\n      reason: \"ASK - Review {tool}. Approve = one harmless local marker, no AWS or secret access.\"\n"""
+SOURCE_WITH_LEGACY_APPROVAL = SOURCE + """interface:\n  agents:\n    toolApproval:\n      enabled: true\n      ask:\n        - apply_demo_remediation_mcp_agentcore_governance\n      reason: \"ASK - Review {tool}. Approve = one harmless local marker, no AWS or secret access.\"\n"""
 
 
 class Issue40ConfigureLibreChatTests(unittest.TestCase):

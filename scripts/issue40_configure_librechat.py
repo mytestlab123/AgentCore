@@ -97,44 +97,24 @@ def known_top_level_fields(lines: list[str], start: int, end: int, server_indent
     return fields
 
 
-def find_child_block(
-    lines: list[str], *, start: int, end: int, indent: int, name: str,
-) -> tuple[int, int] | None:
-    """Return a direct YAML mapping child and its indented extent, if present."""
-    for index in range(start + 1, end):
-        if indent_width(lines[index]) == indent and lines[index].strip() == f"{name}:":
-            child_end = next(
-                (candidate for candidate in range(index + 1, end)
-                 if lines[candidate] and indent_width(lines[candidate]) <= indent),
-                end,
-            )
-            return index, child_end
-    return None
-
-
 def replace_governance_approval_reason(lines: list[str]) -> list[str]:
-    """Replace only the existing governed approval reason; preserve all other policy."""
-    endpoints = next(
-        (index for index, line in enumerate(lines)
-         if line.strip() == "endpoints:" and indent_width(line) == 0),
-        None,
-    )
-    if endpoints is None:
+    """Replace the sole supported toolApproval reason, preserving its location."""
+    tool_approval_indexes = [
+        index for index, line in enumerate(lines)
+        if indent_width(line) == 4 and line.strip() == "toolApproval:"
+    ]
+    if not tool_approval_indexes:
         return lines
-    endpoints_end = next(
-        (index for index in range(endpoints + 1, len(lines))
-         if lines[index] and indent_width(lines[index]) == 0),
+    if len(tool_approval_indexes) != 1:
+        raise ConfigureBlocked("governed toolApproval block is ambiguous")
+    tool_approval_start = tool_approval_indexes[0]
+    tool_approval_end = next(
+        (index for index in range(tool_approval_start + 1, len(lines))
+         if lines[index] and indent_width(lines[index]) <= 4),
         len(lines),
     )
-    agents = find_child_block(lines, start=endpoints, end=endpoints_end, indent=2, name="agents")
-    if agents is None:
-        return lines
-    tool_approval = find_child_block(
-        lines, start=agents[0], end=agents[1], indent=4, name="toolApproval")
-    if tool_approval is None:
-        return lines
     reason_indexes = [
-        index for index in range(tool_approval[0] + 1, tool_approval[1])
+        index for index in range(tool_approval_start + 1, tool_approval_end)
         if indent_width(lines[index]) == 6 and lines[index].lstrip().startswith("reason:")
     ]
     if len(reason_indexes) != 1:
