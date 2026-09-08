@@ -42,6 +42,7 @@ class GovernanceContractTests(unittest.TestCase):
             "Reject = no MCP call and no state change",
             "GOVERNANCE_AWS_READ_ENABLED: required",
             "GOVERNANCE_GATEWAY_POLICY_ENABLED: required",
+            "GOVERNANCE_GATEWAY_URL:",
         ):
             self.assertIn(value, config)
         # The remediation name appears once in `ask` and once in the hook
@@ -146,18 +147,41 @@ Promise.all([run({{environment:'dev'}}), run({{environment:'prod',ticket:''}}), 
             self.assertEqual(server.load_state()["delete_calls"], 0)
             self.assertEqual(server.state_path().stat().st_mode & 0o777, 0o600)
 
-    def test_gateway_verifier_requires_exact_safe_output(self) -> None:
-        completed = subprocess.CompletedProcess(
-            args=[], returncode=0,
-            stdout="GATEWAY_DECISION=ALLOW\nRETAINED_COST_GATE=PASS\nGATEWAY_ACTION_VERIFIED=PASS\n",
-            stderr="",
-        )
-        with mock.patch.dict(os.environ, {"GOVERNANCE_GATEWAY_POLICY_ENABLED": "required"}, clear=False):
-            self.assertEqual(server.verify_gateway("dev", runner=lambda *_args, **_kwargs: completed), "ALLOW")
-        incomplete = subprocess.CompletedProcess(args=[], returncode=0, stdout="GATEWAY_DECISION=ALLOW\n", stderr="")
-        with mock.patch.dict(os.environ, {"GOVERNANCE_GATEWAY_POLICY_ENABLED": "required"}, clear=False):
+    def test_runtime_gateway_client_uses_host_role_and_exact_decisions(self) -> None:
+        def gateway_envelope(environment: str) -> str:
+            if environment == "dev":
+                nested = {"statusCode": 200, "body": json.dumps({
+                    "environment": "dev", "status": "healthy", "source": "synthetic-demo"})}
+                return json.dumps({"jsonrpc": "2.0", "id": "dev", "result": {
+                    "isError": False, "content": [{"type": "text", "text": json.dumps(nested)}]}})
+            return json.dumps({"jsonrpc": "2.0", "id": "prod", "error": {
+                "code": -32002, "message": "Tool Execution Denied: default deny"}})
+
+        def runner(*args, **kwargs):
+            command = args[0]
+            if command[0] == "aws":
+                self.assertNotIn("--profile", command)
+                return subprocess.CompletedProcess(command, 0, json.dumps({
+                    "AccessKeyId": "test-access", "SecretAccessKey": "test-secret", "SessionToken": "test-token"}), "")
+            self.assertEqual(command, ["curl", "--config", "-"])
+            config = kwargs["input"]
+            response_line = next(line for line in config.splitlines() if line.startswith("output = "))
+            response_path = Path(response_line.split('"', 2)[1])
+            environment = "prod" if '"id":"prod"' in Path(next(
+                line for line in config.splitlines() if line.startswith("data-binary = ")).split('"', 2)[1][1:]).read_text() else "dev"
+            response_path.write_text(gateway_envelope(environment), encoding="utf-8")
+            return subprocess.CompletedProcess(command, 0, "200", "")
+
+        settings = {
+            "GOVERNANCE_GATEWAY_POLICY_ENABLED": "required",
+            "GOVERNANCE_GATEWAY_URL": "https://example.gateway.bedrock-agentcore.ap-southeast-1.amazonaws.com",
+        }
+        with tempfile.TemporaryDirectory() as temp, mock.patch.dict(os.environ, settings, clear=False):
+            self.assertEqual(server.verify_gateway("dev", runner=runner), "ALLOW")
+            self.assertEqual(server.verify_gateway("prod", runner=runner), "DENY")
+        with mock.patch.dict(os.environ, {"GOVERNANCE_GATEWAY_POLICY_ENABLED": ""}, clear=False):
             with self.assertRaises(server.GovernanceBlocked):
-                server.verify_gateway("dev", runner=lambda *_args, **_kwargs: incomplete)
+                server.verify_gateway("dev", runner=runner)
 
 
 if __name__ == "__main__":

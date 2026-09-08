@@ -2,8 +2,9 @@
 
 This document states the proof boundary for PR #41. It is intentionally small:
 one governed MCP server, one retained AgentCore Gateway, and one future bounded
-Harness tool protocol. No AWS resource creation or mutation is part of this
-milestone.
+Harness tool protocol. The one approved AWS control-plane change is a separately
+named Cedar permit for the existing LibreChat EC2 role; it does not create or
+modify an application, Gateway, target, Lambda, IAM role, or credential.
 
 ## Flow
 
@@ -11,7 +12,7 @@ milestone.
 LibreChat Agent
   -> native ALLOW or ASK policy
   -> agentcore_governance MCP server
-  -> retained Gateway verifier (controlled action only)
+  -> fixed retained Gateway MCP client (controlled action only)
   -> local demo-state marker (only after Gateway ALLOW)
 ```
 
@@ -57,18 +58,35 @@ private deployment configuration:
 GOVERNANCE_AWS_READ_ENABLED=required
 GOVERNANCE_AWS_REGION=ap-southeast-1
 GOVERNANCE_GATEWAY_POLICY_ENABLED=required
+GOVERNANCE_GATEWAY_URL=https://<existing-gateway>.gateway.bedrock-agentcore.ap-southeast-1.amazonaws.com
 ```
 
-The existing private Gateway identity-hash settings remain outside source
-control. If any prerequisite, credential, retained resource, cost gate, or
+The MCP runtime uses the LibreChat EC2 instance role; it never receives or
+copies the `amit` profile. The existing Gateway Cedar policy must grant that
+specific role only the fixed `check_demo_scope` action in `dev`; `prod` remains
+default-deny. If any prerequisite, role authorization, retained resource, or
 expected response is missing, the MCP response is **BLOCKED** and records no
 local effect. `BLOCKED` is a safe operational result, not an AWS success.
+
+The authorization is named `Issue40LibreChatDevPermit`. Its deployment helper
+first verifies the pre-existing human permit byte-for-byte, permits only the
+EC2 role / fixed tool / retained Gateway / `dev` combination, and reads the
+human permit unchanged again after the new policy is active. It never accepts
+an extra policy in that retained engine.
+
+`scripts/issue40_configure_librechat.py` is the corresponding host-side YAML
+updater. It replaces only the known `agentcore_governance` MCP block, retains a
+mode-600 private backup, and refuses unknown top-level fields in that block.
+The managed Gateway URL is supplied only at deployment time and is never
+committed or printed.
 
 ## Validation commands
 
 ```bash
 python3 integration/librechat-governance/test_governance.py
 PYTHONPATH=scripts python3 scripts/test_gateway_policy_poc.py
+PYTHONPATH=scripts python3 scripts/test_issue40_gateway_authorize.py
+PYTHONPATH=scripts python3 scripts/test_issue40_configure_librechat.py
 ./scripts/check.sh
 ```
 

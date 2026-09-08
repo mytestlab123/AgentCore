@@ -13,9 +13,10 @@ mcpServers:
       # and expected Gateway identity hashes stay in the private host runtime.
       GOVERNANCE_AWS_READ_ENABLED: required
       GOVERNANCE_AWS_REGION: ap-southeast-1
-      # Enables the fixed retained-Gateway verifier. Missing private verifier
-      # gates fail closed and no local remediation marker is written.
+      # Enables the packaged, fixed Gateway runtime client. Set the existing
+      # managed Gateway endpoint only in private deployment configuration.
       GOVERNANCE_GATEWAY_POLICY_ENABLED: required
+      GOVERNANCE_GATEWAY_URL: https://gateway-id.gateway.bedrock-agentcore.ap-southeast-1.amazonaws.com
     chatMenu: false
 
 endpoints:

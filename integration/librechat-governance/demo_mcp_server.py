@@ -16,9 +16,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from gateway_runtime_client import GatewayRuntimeBlocked, verify_gateway as invoke_gateway_runtime
 
-ROOT = Path(__file__).resolve().parents[2]
-GATEWAY_VERIFIER = ROOT / "scripts" / "gateway_policy_poc.py"
 REGION_PATTERN = re.compile(r"^[a-z]{2}(?:-gov)?-[a-z]+-\d$")
 
 
@@ -144,29 +143,11 @@ def read_aws_identity(*, runner: Any = subprocess.run) -> dict[str, str]:
 
 
 def verify_gateway(environment: str, *, runner: Any = subprocess.run) -> str:
-    """Ask the already-retained Gateway verifier for one exact policy decision."""
-    require_setting("GOVERNANCE_GATEWAY_POLICY_ENABLED")
-    if environment not in {"dev", "prod"} or not GATEWAY_VERIFIER.is_file():
-        raise GovernanceBlocked("retained Gateway verifier is unavailable")
-    completed = runner(
-        [sys.executable, str(GATEWAY_VERIFIER), "--verify-retained-action", environment],
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=120,
-        cwd=str(ROOT),
-    )
-    if completed.returncode != 0:
-        raise GovernanceBlocked("retained Gateway policy verification failed")
-    lines = {line.strip() for line in completed.stdout.splitlines()}
-    expected = "ALLOW" if environment == "dev" else "DENY"
-    if {
-        f"GATEWAY_DECISION={expected}",
-        "RETAINED_COST_GATE=PASS",
-        "GATEWAY_ACTION_VERIFIED=PASS",
-    } - lines:
-        raise GovernanceBlocked("retained Gateway policy verification was incomplete")
-    return expected
+    """Ask the retained Gateway directly with the LibreChat host's instance role."""
+    try:
+        return invoke_gateway_runtime(environment, private_dir=state_path().parent, runner=runner)
+    except GatewayRuntimeBlocked as exc:
+        raise GovernanceBlocked("retained Gateway policy verification failed") from exc
 
 
 def blocked_result(title: str) -> dict[str, Any]:

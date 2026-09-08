@@ -13,10 +13,11 @@ harmless local state file. It never creates or mutates AWS resources.
 3. Set `ENDPOINTS=custom,agents` in LibreChat's `.env` when custom endpoints
    are also configured; `agents` must be listed or the native Agents endpoint
    is hidden from the endpoint selector.
-4. In the private LibreChat runtime, provide credentials permitted only for the
-   read-only `sts:GetCallerIdentity` query and the existing private Gateway
-   identity-hash gates used by `scripts/gateway_policy_poc.py`. Do not add those
-   identity values to this repository or YAML example.
+4. In the private LibreChat runtime, use the host instance role for the
+   read-only `sts:GetCallerIdentity` query and the fixed retained-Gateway MCP
+   call. Set the existing managed Gateway URL in `GOVERNANCE_GATEWAY_URL`.
+   The Gateway Cedar policy, not a copied local credential, must authorize that
+   instance role for the narrow `dev` tool call.
 5. Ensure the state directory is private (`700`) and restart LibreChat so the
    MCP server and trusted hook load.
 6. Select `Agents`, open the native Agent Builder, and create an Agent with the
@@ -39,10 +40,11 @@ do not fall through on older saved agents.
    execution, not a failed remediation. If the model receives control after
    the rejection, its final text should begin `ASK / REJECT`.
 3. Repeat and select **Approve**. The MCP server asks the already-retained
-   AgentCore Gateway for the `dev` decision. Only **ALLOW** records one harmless
-   local effect (**ASK / Approve / ALLOW**). The response reports one tool call,
-   no AWS mutation, and no secret access. If the Gateway identity/cost/response
-   gate is unavailable, the server returns **BLOCKED** and records no effect.
+   AgentCore Gateway for the `dev` decision with the host instance role. Only
+   **ALLOW** records one harmless local effect (**ASK / Approve / ALLOW**). The
+   response reports one tool call, no AWS mutation, and no secret access. If
+   the Gateway role/URL/response gate is unavailable, the server returns
+   **BLOCKED** and records no effect.
 4. Ask `Delete web-01.` LibreChat blocks the call before the server runs
    (**DENY**).
 5. Remediation with `environment=prod` and no ticket is denied by the trusted
