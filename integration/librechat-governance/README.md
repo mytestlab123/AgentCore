@@ -1,9 +1,10 @@
 # Issue #24: native LibreChat governance demo
 
-This integration is a small, local-only proof of a governed MCP tool flow.
+This integration is a small governed MCP tool flow for the AgentCore POC.
 LibreChat owns the approval UI, checkpoint/resume, static allow/ask/deny policy,
-and trusted approval hook. The dependency-free MCP server uses synthetic data
-and one harmless local state file. It never calls AWS.
+and trusted approval hook. The dependency-free MCP server uses synthetic finding
+data, one fixed read-only AWS STS query, the retained Gateway verifier, and one
+harmless local state file. It never creates or mutates AWS resources.
 
 ## Configure
 
@@ -12,9 +13,13 @@ and one harmless local state file. It never calls AWS.
 3. Set `ENDPOINTS=custom,agents` in LibreChat's `.env` when custom endpoints
    are also configured; `agents` must be listed or the native Agents endpoint
    is hidden from the endpoint selector.
-4. Ensure the state directory is private (`700`) and restart LibreChat so the
+4. In the private LibreChat runtime, provide credentials permitted only for the
+   read-only `sts:GetCallerIdentity` query and the existing private Gateway
+   identity-hash gates used by `scripts/gateway_policy_poc.py`. Do not add those
+   identity values to this repository or YAML example.
+5. Ensure the state directory is private (`700`) and restart LibreChat so the
    MCP server and trusted hook load.
-5. Select `Agents`, open the native Agent Builder, and create an Agent with the
+6. Select `Agents`, open the native Agent Builder, and create an Agent with the
    `agentcore_governance` MCP server selected.
 
 The example policy includes both the documented `mcp:server:tool` patterns and
@@ -24,22 +29,27 @@ do not fall through on older saved agents.
 
 ## Five-minute flow
 
-1. Ask `Check the security finding for web-01.` The check tool is **ALLOW**.
+1. Ask `Check the security finding for web-01.` The check tool is **ALLOW** and
+   reports the synthetic finding plus the sanitized result of
+   `sts:GetCallerIdentity`; no account, ARN, or user ID is displayed.
 2. Ask `Apply the remediation for web-01 in dev.` Select **Reject**. The MCP
    server is not called and the state remains unchanged (**ASK / Reject**).
    LibreChat may render this native rejection as **Cancelled**; that is the
    expected visual proof that the pending tool call was stopped before MCP
    execution, not a failed remediation. If the model receives control after
    the rejection, its final text should begin `ASK / REJECT`.
-3. Repeat and select **Approve**. One harmless local effect is recorded
-   (**ASK / Approve**). The MCP response starts with a clear Markdown
-   `ASK / APPROVE` result and reports one tool call, no AWS mutation, and no
-   secret access. The assistant's final text should begin `ASK / APPROVE`.
+3. Repeat and select **Approve**. The MCP server asks the already-retained
+   AgentCore Gateway for the `dev` decision. Only **ALLOW** records one harmless
+   local effect (**ASK / Approve / ALLOW**). The response reports one tool call,
+   no AWS mutation, and no secret access. If the Gateway identity/cost/response
+   gate is unavailable, the server returns **BLOCKED** and records no effect.
 4. Ask `Delete web-01.` LibreChat blocks the call before the server runs
    (**DENY**).
 5. Remediation with `environment=prod` and no ticket is denied by the trusted
    hook. With `ticket=DEMO-123`, the hook abstains and static policy remains
-   **ASK**.
+   **ASK**, but the retained Gateway returns **DENY** and the local effect is
+   still not recorded. This demonstrates the independent boundary after the UI
+   approval path.
 
 ## Offline proof
 
@@ -50,11 +60,13 @@ python3 integration/librechat-governance/test_governance.py
 ```
 
 The test checks the exact three tools, native policy patterns, hook decisions,
-ALLOW execution, approved harmless effect, and mode-600 state handling. It does
-not claim that a screenshot proves a running LibreChat deployment.
+sanitized AWS-result handling, Gateway allow/deny behavior, approved harmless
+effect, and mode-600 state handling. It injects deterministic fakes for the
+AWS and Gateway boundaries; it does not claim a screenshot proves a running
+LibreChat deployment or a real AWS read.
 
-This is synthetic policy education, not production RBAC, AWS authorization, or
-a multi-user approval queue.
+This is POC policy education, not production RBAC, AWS authorization, or a
+multi-user approval queue.
 
 The `apply_demo_remediation` schema marks `ticket` optional for `dev`; the
 native LibreChat approval prompt, not the model or MCP server, is the human

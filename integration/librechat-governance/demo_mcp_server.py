@@ -1,22 +1,34 @@
 #!/usr/bin/env python3
-"""Tiny synthetic MCP server for the Issue #24 LibreChat governance demo.
+"""Small stdio MCP server for the governed AgentCore demonstration.
 
-The server is intentionally dependency-free and stdio-only. It never calls AWS
-and writes only a local demo-state file selected by GOVERNANCE_STATE_FILE.
+The server deliberately has a narrow surface: one sanitized read-only AWS STS
+check, one retained AgentCore Gateway decision check, and one local demo-state
+marker.  It never creates or mutates AWS resources.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
+
+ROOT = Path(__file__).resolve().parents[2]
+GATEWAY_VERIFIER = ROOT / "scripts" / "gateway_policy_poc.py"
+REGION_PATTERN = re.compile(r"^[a-z]{2}(?:-gov)?-[a-z]+-\d$")
+
+
+class GovernanceBlocked(RuntimeError):
+    """A required independent control was unavailable or rejected the action."""
+
 TOOLS = [
     {
         "name": "check_security_finding",
-        "description": "Read-only synthetic security finding lookup for web-01.",
+        "description": "Read-only finding lookup plus a sanitized AWS STS identity check for web-01.",
         "inputSchema": {
             "type": "object",
             "properties": {"host": {"type": "string", "enum": ["web-01"]}},
@@ -26,7 +38,9 @@ TOOLS = [
     {
         "name": "apply_demo_remediation",
         "description": (
-            "Harmless local demo effect. For environment=dev, call this tool "
+            "Harmless local demo effect. For environment=dev, native approval and "
+            "the retained AgentCore Gateway must allow this tool before it can "
+            "record one local marker. Call this tool "
             "directly with host and environment; ticket is optional. Do not "
             "ask the user to confirm; native LibreChat approval handles the "
             "decision. For environment=prod, ticket must start with DEMO-."
@@ -96,21 +110,101 @@ def text_result(text: str, *, error: bool = False) -> dict[str, Any]:
     return result
 
 
-def call_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
+def require_setting(name: str) -> None:
+    if os.environ.get(name) != "required":
+        raise GovernanceBlocked("required runtime setting is absent")
+
+
+def aws_region() -> str:
+    region = os.environ.get("GOVERNANCE_AWS_REGION", "ap-southeast-1")
+    if not REGION_PATTERN.fullmatch(region):
+        raise GovernanceBlocked("invalid AWS region setting")
+    return region
+
+
+def read_aws_identity(*, runner: Any = subprocess.run) -> dict[str, str]:
+    """Run a fixed read-only identity query and discard all identity values."""
+    require_setting("GOVERNANCE_AWS_READ_ENABLED")
+    completed = runner(
+        ["aws", "sts", "get-caller-identity", "--region", aws_region(), "--output", "json", "--no-cli-pager"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    if completed.returncode != 0:
+        raise GovernanceBlocked("read-only AWS identity query failed")
+    try:
+        identity = json.loads(completed.stdout)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise GovernanceBlocked("read-only AWS identity query returned invalid JSON") from exc
+    if not all(isinstance(identity.get(key), str) and identity[key] for key in ("Account", "Arn", "UserId")):
+        raise GovernanceBlocked("read-only AWS identity query returned an incomplete identity")
+    return {"api": "sts:GetCallerIdentity", "result": "identity verified", "mutation": "none"}
+
+
+def verify_gateway(environment: str, *, runner: Any = subprocess.run) -> str:
+    """Ask the already-retained Gateway verifier for one exact policy decision."""
+    require_setting("GOVERNANCE_GATEWAY_POLICY_ENABLED")
+    if environment not in {"dev", "prod"} or not GATEWAY_VERIFIER.is_file():
+        raise GovernanceBlocked("retained Gateway verifier is unavailable")
+    completed = runner(
+        [sys.executable, str(GATEWAY_VERIFIER), "--verify-retained-action", environment],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        cwd=str(ROOT),
+    )
+    if completed.returncode != 0:
+        raise GovernanceBlocked("retained Gateway policy verification failed")
+    lines = {line.strip() for line in completed.stdout.splitlines()}
+    expected = "ALLOW" if environment == "dev" else "DENY"
+    if {
+        f"GATEWAY_DECISION={expected}",
+        "RETAINED_COST_GATE=PASS",
+        "GATEWAY_ACTION_VERIFIED=PASS",
+    } - lines:
+        raise GovernanceBlocked("retained Gateway policy verification was incomplete")
+    return expected
+
+
+def blocked_result(title: str) -> dict[str, Any]:
+    return text_result(
+        f"## BLOCKED - {title}\n\n"
+        "- No local demo effect was recorded\n"
+        "- No AWS or infrastructure mutation was made\n"
+        "- Check the private runtime prerequisites; details are intentionally not exposed.",
+        error=True,
+    )
+
+
+def call_tool(
+    name: str,
+    args: dict[str, Any],
+    *,
+    aws_read: Any | None = None,
+    gateway_check: Any | None = None,
+) -> dict[str, Any]:
     state = load_state()
     host = args.get("host")
     if host != "web-01":
         return text_result("Only synthetic host web-01 is supported.", error=True)
 
     if name == "check_security_finding":
+        try:
+            aws_result = (aws_read or read_aws_identity)()
+        except GovernanceBlocked:
+            return blocked_result("read-only AWS identity check unavailable")
         state["finding_calls"] += 1
         save_state(state)
         return text_result(
-            "## ALLOW - Security finding returned\n\n"
+            "## ALLOW - Security finding and AWS read returned\n\n"
             "- Host: `web-01`\n"
             "- Severity: **HIGH**\n"
             "- Finding: `demo-cve-2026-0001`\n"
             "- Recommended action: patch package `demo-lib`\n"
+            f"- AWS API: `{aws_result['api']}` ({aws_result['result']})\n"
             "- MCP tool calls: **1**\n"
             "- AWS or infrastructure mutation: **none**"
         )
@@ -122,14 +216,29 @@ def call_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
             return text_result("Backend guard: prod remediation requires a DEMO-* ticket.", error=True)
         if environment not in {"dev", "prod"}:
             return text_result("Environment must be dev or prod.", error=True)
+        try:
+            decision = (gateway_check or verify_gateway)(environment)
+        except GovernanceBlocked:
+            return blocked_result("independent Gateway Policy verification unavailable")
+        if decision != "ALLOW":
+            return text_result(
+                "## DENY - Gateway Policy blocked remediation\n\n"
+                f"- Host: `{host}`\n"
+                f"- Environment: `{environment}`\n"
+                "- Gateway decision: **DENY**\n"
+                "- Local demo effect recorded: **no**\n"
+                "- AWS or infrastructure mutation: **none**",
+                error=True,
+            )
         state["remediation_calls"] += 1
         state["remediated"] = True
         save_state(state)
         return text_result(
-            "## ASK / APPROVE - Remediation completed\n\n"
+            "## ASK / APPROVE / ALLOW - Remediation completed\n\n"
             f"- Host: `{host}`\n"
             f"- Environment: `{environment}`\n"
             "- Result: **one harmless local demo effect recorded**\n"
+            "- Gateway decision: **ALLOW**\n"
             "- MCP tool calls: **1** (after approval)\n"
             "- AWS or infrastructure mutation: **none**\n"
             "- Secrets accessed: **none**"

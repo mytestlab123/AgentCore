@@ -726,6 +726,32 @@ def prove_fixed_action(aws, gateway, environment):
     return evidence
 
 
+def verify_retained_action(environment):
+    """Verify one existing Gateway decision without any create or repair path.
+
+    This is the narrow bridge used by the governed local demo action. It calls
+    the retained Gateway once and validates its response, but intentionally
+    does not wait for or interpret Lambda metrics; the full proof owns that
+    execution-count evidence.
+    """
+    validate_case(TOOL_NAME, environment)
+    aws, gateway, cost = retained_live_context()
+    code, body = invoke_gateway(aws, gateway["gatewayUrl"], environment)
+    if environment == "dev":
+        parse_dev_response(code, body)
+        decision = "ALLOW"
+    else:
+        parse_prod_response(code, body)
+        decision = "DENY"
+    result = {
+        "environment": environment,
+        "decision": decision,
+        "retained_cost_gate": "PASS" if validate_cost(cost) < COST_LIMIT else "BLOCKED",
+    }
+    write_private_json(aws.private_dir / f"m1-gateway-{environment}.json", result)
+    return result
+
+
 def stack_resources(aws, stack_name):
     stack = aws.call("cloudformation", "describe-stacks", {"StackName": stack_name})
     items = aws.call("cloudformation", "describe-stack-resources", {"StackName": stack_name})
@@ -949,9 +975,12 @@ def main():
                         help="prove the already-deployed retained stack")
     parser.add_argument("--approve-live", action="store_true",
                         help="converge the native stack and run the complete live proof")
+    parser.add_argument("--verify-retained-action", choices=("dev", "prod"),
+                        help="verify one retained Gateway decision without resource mutation")
     args = parser.parse_args()
     try:
-        if sum((args.prepare_live, args.prove_live, args.approve_live)) > 1:
+        if sum((args.prepare_live, args.prove_live, args.approve_live,
+                bool(args.verify_retained_action))) > 1:
             raise Blocked("select one live mode")
         if args.prepare_live:
             prepare_live()
@@ -959,6 +988,11 @@ def main():
             prove_live()
         elif args.approve_live:
             prove_live(converge=True)
+        elif args.verify_retained_action:
+            result = verify_retained_action(args.verify_retained_action)
+            print(f"GATEWAY_DECISION={result['decision']}")
+            print(f"RETAINED_COST_GATE={result['retained_cost_gate']}")
+            print("GATEWAY_ACTION_VERIFIED=PASS")
         else:
             plan()
     except (Blocked, subprocess.TimeoutExpired) as error:

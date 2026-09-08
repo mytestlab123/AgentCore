@@ -232,6 +232,21 @@ class GatewayPolicyPocTest(unittest.TestCase):
                 poc.prove_live()
         proof.assert_not_called()
 
+    def test_one_retained_action_validates_only_its_gateway_decision(self):
+        with tempfile.TemporaryDirectory() as directory:
+            aws = mock.Mock()
+            aws.private_dir = Path(directory)
+            gateway = {"gatewayUrl": "https://demo.gateway.bedrock-agentcore.ap-southeast-1.amazonaws.com"}
+            with mock.patch.object(poc, "PRIVATE_ROOT", Path(directory)), \
+                    mock.patch.object(poc, "retained_live_context", return_value=(aws, gateway, 1.01)), \
+                    mock.patch.object(poc, "invoke_gateway", return_value=(200, dev_response())), \
+                    mock.patch.object(poc, "parse_dev_response") as parse_dev, \
+                    mock.patch.object(poc, "wait_for_metric") as metric_wait:
+                result = poc.verify_retained_action("dev")
+        self.assertEqual(result, {"environment": "dev", "decision": "ALLOW", "retained_cost_gate": "PASS"})
+        parse_dev.assert_called_once()
+        metric_wait.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
