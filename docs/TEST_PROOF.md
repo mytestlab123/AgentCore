@@ -1,6 +1,38 @@
 # AgentCore Test Proof
 
-Last verified: 8 September 2026, 16:27 SGT
+Last verified: 8 September 2026, 18:49 SGT
+
+## Issue #46 real Security Group SSH signal — live host proof
+
+Last verified: 8 September 2026, 18:49 SGT
+
+The deployed LibreChat MCP source was updated to PR #47 commit `712eab3` and
+the verified LibreChat process group was restarted cleanly. The dedicated demo
+Security Group is intentionally unattached and has unrestricted TCP/22 ingress.
+The host instance role received the one required read-only
+`ec2:DescribeSecurityGroups` List permission; its policy statement uses
+`Resource: "*"` because AWS does not define a resource type for that action.
+The MCP implementation still reads only its fixed private demo Group ID.
+
+| Step | Observed result |
+| --- | --- |
+| Local real AWS implementation path | sanitized `TCP/22` / `0.0.0.0/0` / `NON_COMPLIANT`; mutation `none` |
+| EC2 role authorization | `HOST_EC2_DESCRIBE_SECURITY_GROUPS=allowed` |
+| Deployed live MCP read | `LIVE_MCP_SECURITY_GROUP_READ=ALLOW` |
+| Compliance result | `LIVE_MCP_SECURITY_GROUP_COMPLIANCE=NON_COMPLIANT` |
+| Read operation side effect | `LIVE_MCP_AWS_MUTATION=none` |
+| State-file protection | `LIVE_MCP_STATE_FILE=private` |
+| LibreChat availability after restart | HTTP `200` |
+
+No AWS Security Group, network path, instance, secret, or controlled
+remediation was changed by this proof. The approved IAM read permission and
+private LibreChat MCP configuration were the only deployment changes.
+
+Proof boundary: this is a real deployed MCP/backend result, not a native
+LibreChat-browser click proof. The repository browser runner tests only
+loopback-owned portal/Gateway applications and does not automate the separate
+authenticated LibreChat session. Manual native UI acceptance remains required
+for the visible Agent tool result.
 
 ## Issue #44 compact Security Copilot audit — live backend proof
 
