@@ -5,22 +5,21 @@
 Build a small, understandable internal AI platform POC following `ROADMAP.md`.
 Follow KISS and optimize for a 3-5 minute demo.
 
-The active implementation milestone is Issue #44: complete roadmap M5-M7 as
-one platform-experience and final Security Copilot demo.
+The active implementation milestone is Issue #46: replace the synthetic
+read-only security finding with one real AWS security/compliance signal while
+reusing the merged M1-M7 platform and demo path.
 
 ## Scope
 
 - Keep local simulation usable without AWS.
 - Reuse the existing Project/Home, Playground, Logs, LibreChat, Gateway, Harness
   and validation paths before adding another framework.
-- Reuse the merged M1-M4 governed workflow rather than rebuilding approval,
-  Gateway Policy, AWS read, or controlled-action plumbing.
-- Reuse the existing governed Codex, LibreChat, Gateway, Harness, and
-  validation paths. Present their existing evidence as one compact audit
-  sequence; do not build a second UI, observability system, or framework.
-- Issue #44 may use one bounded, read-only Agent Inspector/developer check of
-  the retained Gateway's known denied synthetic input. It is a developer/debug
-  proof, never the user-facing approval UI.
+- Reuse the merged M1-M7 governed workflow and final demo rather than rebuilding
+  approval, Gateway Policy, audit, developer-client, or controlled-action plumbing.
+- Issue #46 should choose exactly one already-available read-only AWS security
+  source and show a small sanitized result through the existing LibreChat path.
+- Keep the controlled remediation harmless/local for this milestone; do not turn
+  this into a real remediation engine yet.
 - Do not create, update, or delete AWS resources unless Amit separately
   approves the exact mutation.
 - Cognito, hosting, many projects/providers, billing, RAG, Kubernetes, complex
