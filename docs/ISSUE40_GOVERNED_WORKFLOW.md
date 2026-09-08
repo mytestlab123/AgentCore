@@ -67,7 +67,9 @@ GOVERNANCE_GATEWAY_URL=https://<existing-gateway>.gateway.bedrock-agentcore.ap-s
 The MCP runtime uses the LibreChat EC2 instance role; it never receives or
 copies the `amit` profile. That role needs only the read-only
 `ec2:DescribeSecurityGroups` permission required for the fixed demo Security
-Group. The existing Gateway Cedar policy must grant that
+Group. AWS defines that API as a List action without a resource type, so its
+IAM statement must use `Resource: "*"`; the MCP server still queries only its
+fixed private demo Group ID. The existing Gateway Cedar policy must grant that
 specific role only the fixed `check_demo_scope` action in `dev`; `prod` remains
 default-deny. If any prerequisite, role authorization, retained resource, or
 expected response is missing, the MCP response is **BLOCKED** and records no

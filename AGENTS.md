@@ -20,8 +20,14 @@ reusing the merged M1-M7 platform and demo path.
   source and show a small sanitized result through the existing LibreChat path.
 - Keep the controlled remediation harmless/local for this milestone; do not turn
   this into a real remediation engine yet.
-- Do not create, update, or delete AWS resources unless Amit separately
-  approves the exact mutation.
+- An active Amit-approved Issue, PR, goal, task, or milestone authorizes the
+  normal scoped AWS, IAM, configuration, deployment, service-restart, and
+  validation changes needed to complete it. Do not request a second approval
+  for those implementation steps.
+- Stop and surface a decision only when a proposed action materially expands
+  the approved scope, changes the authorization/security model, needs a
+  different AWS profile/account/Region, creates an unrelated resource, or
+  would cause an unapproved external impact.
 - Cognito, hosting, many projects/providers, billing, RAG, Kubernetes, complex
   routing, broad observability, and generic AWS-assistant behavior remain out of
   scope unless a later roadmap milestone explicitly requires them.
@@ -40,8 +46,8 @@ reusing the merged M1-M7 platform and demo path.
   they do not authorize or select an AWS production profile/account/environment.
 - Do not switch to another AWS profile merely because a command is blocked.
   Record the blocker or ask Amit if a different context is genuinely required.
-- Bounded AWS changes that are part of an approved POC milestone are acceptable;
-  keep them narrow, intentional, and recorded.
+- Bounded AWS changes that are part of an approved POC milestone are authorized;
+  keep them narrow, intentional, and recorded without asking Amit again.
 - Before any AWS test, confirm the active identity/profile and Region. Do not
   print or commit sensitive identity values as evidence.
 
