@@ -7,7 +7,8 @@ turning each idea into a separate micro-POC.
 
 - Follow KISS: one useful milestone, normally 2-3 related improvements, one
   demonstrable outcome.
-- Prefer one Issue + one ready PR per milestone. Reuse them for related fixes.
+- Group related milestones when they naturally form one usable outcome; the M1-M7
+  labels are capability checkpoints, not mandatory PR boundaries.
 - Build the MVP first; add only proportional validation for changed behavior.
 - Reuse current code, retained POC resources, LibreChat, Gateway, Harness and
   existing browser/test helpers before adding another framework.
@@ -31,6 +32,19 @@ plumbing experiments:
 - loopback visual Gateway Policy proof with backend execution evidence.
 
 Future milestones should combine these pieces rather than re-prove them.
+
+## Delivery plan
+
+Use two implementation PRs unless a real blocker makes that split impractical:
+
+1. **PR 1 - Governed agent workflow MVP:** M1-M4. Human approval + Gateway
+   Policy + Harness tool-use + one real read-only AWS lookup + one harmless
+   demo-owned controlled action.
+2. **PR 2 - Platform experience + final demo:** M5-M7. Codex/Kiro developer
+   clients + one useful audit timeline + polished five-minute Security Copilot
+   story.
+
+Do not create separate micro-PRs for each roadmap checkpoint.
 
 ## Milestones
 
@@ -165,11 +179,9 @@ Do not add these merely because they are common platform features:
 
 ## How to use this roadmap
 
-When a milestone is selected:
-
-1. create or reuse one Issue describing the usable outcome and 2-3 related
-   tasks;
-2. let the worker implement and validate the complete milestone;
-3. open one ready PR when it is reviewable;
-4. review the full milestone, fix related findings in the same PR, then merge;
-5. update this file only when the direction materially changes.
+1. Use one Issue per useful implementation milestone, not per checkpoint.
+2. Keep related implementation and corrections in the same PR.
+3. Use focused tests while iterating and one final browser/live proof when the
+   milestone makes that claim.
+4. Merge when the complete milestone is reviewable and its important path works.
+5. Update this file only when the direction materially changes.
