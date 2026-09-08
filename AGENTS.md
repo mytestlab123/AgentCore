@@ -27,8 +27,10 @@ one platform-experience and final Security Copilot demo.
   the known tested profile with the required Bedrock and AgentCore access.
 - The `dev` profile may be used when a task specifically needs that development
   context.
-- Do not use a `prod` profile/account/environment for this POC or for routine
+- Do not use a `prod` AWS profile/account/environment for this POC or for routine
   testing at this stage.
+- Historical or synthetic test values named `prod` may remain as deny-test input;
+  they do not authorize or select an AWS production profile/account/environment.
 - Do not switch to another AWS profile merely because a command is blocked.
   Record the blocker or ask Amit if a different context is genuinely required.
 - Bounded AWS changes that are part of an approved POC milestone are acceptable;
