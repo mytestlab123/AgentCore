@@ -21,6 +21,16 @@ Do not add FAST, a new custom chat frontend, or RAG for this milestone.
 
 Agent Inspector is a developer/debug surface, not the final user interface.
 
+Current bounded Inspector result: **BLOCKED without an AWS call**. The retained
+artifact is an IAM-protected MCP Gateway, while Agent Inspector is the local
+web UI launched by `agentcore dev`; attaching it would require new local
+agent/client and SigV4 scaffolding, which this milestone excludes. The concise
+sanitized evidence is the [PR #45 Inspector
+comment](https://github.com/mytestlab123/AgentCore/pull/45#issuecomment-5581509043).
+The already-proven Codex Bedrock wrapper remains the governed developer-client
+path; `scripts/codex-bedrock-smoke.sh --check` verifies its installed CLI and
+read-only invocation contract without requesting a credential.
+
 ### M6 — compact audit story
 
 Reuse existing evidence and logging. Present one small sequence for a governed
@@ -29,6 +39,17 @@ request:
 `request -> tool -> human decision -> Gateway decision -> backend effect/blocked -> final result`
 
 Do not build a new observability platform.
+
+Implementation: each completed read-only or remediation MCP result renders this
+safe six-part sequence and retains at most eight similarly sanitized local
+events:
+
+`request -> tool -> human decision -> Gateway decision -> backend -> final result`
+
+A LibreChat **Reject** deliberately has no MCP event: the visible native
+`Cancelled` card is the evidence that the server was not called. A `prod`
+request with `DEMO-*` can be approved at the UI and still produces the separate
+Gateway **DENY** result with no local effect.
 
 ### M7 — five-minute Security Copilot demo
 
@@ -39,6 +60,10 @@ Use the existing `web-01` flow:
 3. allowed approval reaches Gateway ALLOW and exactly one harmless effect;
 4. reject or the existing denied case produces no additional effect;
 5. show the compact audit/evidence sequence.
+
+The final operator script and exact expected results are in
+`docs/LIBRECHAT_END_USER_GUIDE.md`. This preserves the native LibreChat UI: no
+custom approval panel, dashboard, or replacement chat surface is added.
 
 ## Validation
 

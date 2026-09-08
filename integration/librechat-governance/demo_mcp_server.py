@@ -92,14 +92,76 @@ def state_path() -> Path:
 def load_state() -> dict[str, Any]:
     path = state_path()
     if not path.exists():
-        return {"finding_calls": 0, "remediation_calls": 0, "delete_calls": 0, "remediated": False}
-    return json.loads(path.read_text(encoding="utf-8"))
+        return empty_state()
+    state = json.loads(path.read_text(encoding="utf-8"))
+    # Older retained demo-state files predate the compact audit.  Preserve the
+    # counters rather than forcing an operator to reset a demonstration.
+    if not isinstance(state, dict):
+        return empty_state()
+    for key, value in empty_state().items():
+        state.setdefault(key, value)
+    if not isinstance(state["audit_events"], list):
+        state["audit_events"] = []
+    return state
+
+
+def empty_state() -> dict[str, Any]:
+    return {
+        "finding_calls": 0,
+        "remediation_calls": 0,
+        "delete_calls": 0,
+        "remediated": False,
+        "audit_events": [],
+    }
 
 
 def save_state(state: dict[str, Any]) -> None:
     path = state_path()
     path.write_text(json.dumps(state, sort_keys=True) + "\n", encoding="utf-8")
     path.chmod(0o600)
+
+
+def record_audit(
+    state: dict[str, Any],
+    *,
+    request: str,
+    tool: str,
+    human_decision: str,
+    gateway_decision: str,
+    backend: str,
+    final_result: str,
+) -> None:
+    """Keep a small, safe local summary rather than a second observability system."""
+    event = {
+        "request": request,
+        "tool": tool,
+        "human_decision": human_decision,
+        "gateway_decision": gateway_decision,
+        "backend": backend,
+        "final_result": final_result,
+    }
+    state["audit_events"] = [*state["audit_events"], event][-8:]
+
+
+def audit_markdown(
+    *,
+    request: str,
+    tool: str,
+    human_decision: str,
+    gateway_decision: str,
+    backend: str,
+    final_result: str,
+) -> str:
+    """Return the six-part audit story that is safe to show in LibreChat."""
+    return (
+        "### Compact audit\n\n"
+        f"1. Request: {request}\n"
+        f"2. Tool: `{tool}`\n"
+        f"3. Human decision: {human_decision}\n"
+        f"4. Gateway decision: {gateway_decision}\n"
+        f"5. Backend: {backend}\n"
+        f"6. Final result: {final_result}"
+    )
 
 
 def text_result(text: str, *, error: bool = False) -> dict[str, Any]:
@@ -178,6 +240,15 @@ def call_tool(
         except GovernanceBlocked:
             return blocked_result("read-only AWS identity check unavailable")
         state["finding_calls"] += 1
+        record_audit(
+            state,
+            request="read-only security finding for `web-01`",
+            tool=name,
+            human_decision="**not required** (read-only)",
+            gateway_decision="**not required** (no controlled action)",
+            backend="sanitized `sts:GetCallerIdentity`; mutation **none**",
+            final_result="**ALLOW** — finding returned",
+        )
         save_state(state)
         return text_result(
             "## ALLOW - Security finding and AWS read returned\n\n"
@@ -187,7 +258,15 @@ def call_tool(
             "- Recommended action: patch package `demo-lib`\n"
             f"- AWS API: `{aws_result['api']}` ({aws_result['result']})\n"
             "- MCP tool calls: **1**\n"
-            "- AWS or infrastructure mutation: **none**"
+            "- AWS or infrastructure mutation: **none**\n\n"
+            + audit_markdown(
+                request="read-only security finding for `web-01`",
+                tool=name,
+                human_decision="**not required** (read-only)",
+                gateway_decision="**not required** (no controlled action)",
+                backend="sanitized `sts:GetCallerIdentity`; mutation **none**",
+                final_result="**ALLOW** — finding returned",
+            )
         )
 
     if name == "apply_demo_remediation":
@@ -202,17 +281,44 @@ def call_tool(
         except GovernanceBlocked:
             return blocked_result("independent Gateway Policy verification unavailable")
         if decision != "ALLOW":
+            record_audit(
+                state,
+                request=f"controlled remediation for `{host}` in `{environment}`",
+                tool=name,
+                human_decision="tool reached the server; native Reject would stop before this point",
+                gateway_decision="**DENY**",
+                backend="local demo effect **not recorded**",
+                final_result="**DENY** — Gateway blocked remediation",
+            )
+            save_state(state)
             return text_result(
                 "## DENY - Gateway Policy blocked remediation\n\n"
                 f"- Host: `{host}`\n"
                 f"- Environment: `{environment}`\n"
                 "- Gateway decision: **DENY**\n"
                 "- Local demo effect recorded: **no**\n"
-                "- AWS or infrastructure mutation: **none**",
+                "- AWS or infrastructure mutation: **none**\n\n"
+                + audit_markdown(
+                    request=f"controlled remediation for `{host}` in `{environment}`",
+                    tool=name,
+                    human_decision="tool reached the server; native Reject would stop before this point",
+                    gateway_decision="**DENY**",
+                    backend="local demo effect **not recorded**",
+                    final_result="**DENY** — Gateway blocked remediation",
+                ),
                 error=True,
             )
         state["remediation_calls"] += 1
         state["remediated"] = True
+        record_audit(
+            state,
+            request=f"controlled remediation for `{host}` in `{environment}`",
+            tool=name,
+            human_decision="tool reached the server; native Reject would stop before this point",
+            gateway_decision="**ALLOW**",
+            backend="one harmless local demo effect recorded",
+            final_result="**ASK / APPROVE / ALLOW** — remediation completed",
+        )
         save_state(state)
         return text_result(
             "## ASK / APPROVE / ALLOW - Remediation completed\n\n"
@@ -222,7 +328,15 @@ def call_tool(
             "- Gateway decision: **ALLOW**\n"
             "- MCP tool calls: **1** (after approval)\n"
             "- AWS or infrastructure mutation: **none**\n"
-            "- Secrets accessed: **none**"
+            "- Secrets accessed: **none**\n\n"
+            + audit_markdown(
+                request=f"controlled remediation for `{host}` in `{environment}`",
+                tool=name,
+                human_decision="tool reached the server; native Reject would stop before this point",
+                gateway_decision="**ALLOW**",
+                backend="one harmless local demo effect recorded",
+                final_result="**ASK / APPROVE / ALLOW** — remediation completed",
+            )
         )
 
     if name == "delete_demo_asset":
