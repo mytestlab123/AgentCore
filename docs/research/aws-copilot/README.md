@@ -8,14 +8,14 @@ This packet is **research and architecture guidance only**. It does not create t
 
 ## Executive recommendation
 
-The current repo has proved enough plumbing. Keep it as the R&D/reference repository. For the next product phase, create a clean repo under `amitkarpe/*` only after Kiro independently reviews this packet.
+The current repo has proved enough plumbing. Keep it as the R&D/reference repository. Create the clean long-term product repository only after the current Kiro deep review closes the remaining architecture questions.
 
-Use **AWS Copilot** as a working product name if it helps communication, but be aware that AWS already used the name **AWS Copilot CLI** for ECS/Fargate/App Runner; that CLI reached end of support on 12 June 2026. A public or long-lived repository may therefore eventually benefit from a less ambiguous name such as `aws-secops`, `aws-secops-copilot`, or `secops-copilot`. Naming should not block architecture work.
+Use **AWS Copilot** as a working/display name if it helps communication. For a short long-term repository name, `aws-secops` remains a strong candidate because AWS already used **AWS Copilot CLI** for ECS/Fargate/App Runner.
 
 The recommended product direction is:
 
 ```text
-LibreChat or another thin UI
+thin UI / LibreChat initially
         |
         v
 AgentCore Harness
@@ -27,8 +27,8 @@ AgentCore Gateway (MCP)
 AgentCore Policy
         |
         v
-exact governed tool target
-(Lambda or Runtime-hosted MCP tool)
+exact governed tool
+(prefer tiny Lambda MCP targets first)
         |
         v
 STS AssumeRole
@@ -36,23 +36,38 @@ STS AssumeRole
         +--> AWS account A
         +--> AWS account B
         +--> ... 14-50+ accounts
+        |
+        v
+provider verification + audit
 ```
 
-The critical architectural improvement over the current POC is that the **actual action tool should sit behind Gateway**. Today the POC asks the retained Gateway for an authorization decision and then the EC2-hosted MCP server independently performs the EC2 API action. In the product architecture, the Gateway invocation itself should invoke the governed tool. This removes the split between "check policy" and "do AWS action".
+The critical architectural improvement over the current POC is that the **actual action tool should sit behind Gateway**. Today the POC asks the retained Gateway for an authorization decision and then the EC2-hosted MCP server independently performs the EC2 API action. In the product architecture, the Gateway invocation itself should invoke the governed tool.
+
+## Latest reviewed decisions
+
+The 2026-09-09 deep-research pass adds these decisions:
+
+1. **Harness is already available in Singapore.** Use `ap-southeast-1` for the live MVP control plane now; do not wait for a future launch.
+2. **Registry is optional, not blocking.** AWS Agent Registry is currently GA in five Regions and not Singapore. Keep descriptors/IaC Registry-ready; optionally use Sydney later as a catalog learning lab without moving the live runtime.
+3. **Do not host the product workload in the Organizations management account.** Use a member security/tooling or sandbox account; keep management-account access for organization/bootstrap administration.
+4. **Use Organizations + STS + StackSets for scale.** Central AgentCore execution assumes fixed read/remediation roles in member accounts; service-managed StackSets can distribute those roles across OUs and future accounts.
+5. **Do not build another scanner.** Prefer provider-native findings from Security Hub CSPM, Config, Inspector, Access Analyzer, GuardDuty, and direct AWS APIs; differentiate on explanation, human governance, exact remediation, verification, and audit.
+6. **Keep builder tooling separate from runtime authority.** AWS Agent Toolkit / broad AWS MCP can accelerate Kiro/Codex development, but production writes remain narrow Gateway-governed tools.
+7. **Temporal approval is later.** Existing LibreChat/native approval is not automatically a Policy-visible historical event. A later milestone must represent trusted human approval explicitly in the temporal policy session.
+
+See [DEEP_RESEARCH_2026-09-09.md](./DEEP_RESEARCH_2026-09-09.md) for the reviewed findings and revised milestone sequence.
 
 ## Why Harness-first
 
-AWS now positions AgentCore Harness as the managed orchestration layer running inside AgentCore Runtime. The harness supplies the agent loop, session isolation, model selection, Gateway integration, skills, memory, observability and execution limits largely through configuration. Runtime remains available when we need custom orchestration, a custom framework, A2A servers, non-agent workflows, hooks, or code that Harness configuration cannot express.
+AWS positions AgentCore Harness as the managed orchestration layer running inside AgentCore Runtime. Harness supplies the agent loop, session isolation, model selection, Gateway integration, skills, memory, observability and execution limits largely through configuration. Runtime remains available when we need custom orchestration, another framework, A2A servers, non-agent workflows, hooks, or code that Harness configuration cannot express.
 
 Recommended rule:
 
 > Start a specialist agent as a Harness. Export to Strands/Runtime only when a concrete Harness limitation appears.
 
-AWS supports exporting a working Harness to editable Strands Python code, so starting managed does not lock the project into configuration forever.
-
 ## What "real MVP" means next
 
-The next product should stop using synthetic display identity where provider truth is available. For an approved lab/account, the UI should be able to show the real AWS values returned by provider APIs, for example:
+The next product should stop using synthetic display identity where provider truth is available. For an approved private lab/account, the UI should be able to show real AWS values returned by provider APIs, for example:
 
 ```text
 Account ID / friendly alias
@@ -67,7 +82,7 @@ actual verification result
 
 Do not hard-code these values merely to look real. Read them from AWS and display them as provider evidence.
 
-The deployed application should also stop depending on Amit's interactive SSO session. Development can continue using `AWS_PROFILE=amit`; the deployed solution should use workload IAM roles and, for other AWS accounts, narrow cross-account STS `AssumeRole` roles.
+The deployed application must not depend on Amit's interactive SSO session. Development/bootstrap can continue using `AWS_PROFILE=amit`; deployed workloads use IAM execution roles and cross-account STS `AssumeRole`.
 
 ## Multi-agent direction
 
@@ -75,24 +90,24 @@ Do not begin with autonomous orchestration. First prove two independent speciali
 
 ```text
 Compliance Agent
+  -> Security Hub / Config / direct provider APIs
   -> Security Groups
   -> S3 Block Public Access
   -> EC2 IMDSv2
-  -> Config corroboration / WAF later
 
 Vulnerability Agent
-  -> ECR
-  -> existing Inspector findings
-  -> image digest / CVE / fix evidence
+  -> Inspector / ECR
+  -> optional Security Agent / Continuum context
+  -> real CVE / digest / severity / fix evidence
 ```
 
-Use manual agent selection/switching first. After both specialists work independently with the same governance layer, introduce a Supervisor using AgentCore Runtime/A2A if automatic routing adds clear value.
+Use manual agent selection/switching first. Introduce a Supervisor using Runtime/A2A only after automatic routing adds clear value.
 
 ## Multi-account direction
 
-For 14-50+ accounts, prefer one central Security Copilot / security-tooling account for the AgentCore control plane rather than deploying the whole agent stack into every member account.
+For 14-50+ accounts, prefer one central Security Copilot / security-tooling member account for the AgentCore control plane rather than deploying the whole agent stack into every member account.
 
-A likely pattern is:
+Likely pattern:
 
 ```text
 central Harness / tool execution role
@@ -103,39 +118,55 @@ member-account AwsCopilotReadRole
 or narrow AwsCopilotRemediationRole
 ```
 
-The member account role remains subject to its own IAM policies, SCPs and other organization guardrails. This is standard AWS cross-account role delegation and does not require a human SSO session at runtime.
+Use Organizations/StackSets to distribute fixed member-account roles to selected OUs. Account/Region/role routing must remain server-owned or allowlisted rather than model-selected.
 
 ## Region decision
 
-Singapore (`ap-southeast-1`) is a good default for this MVP because AgentCore Harness, Runtime, Gateway, Identity, Policy, Observability, Evaluations and temporal policies are supported there, and VPC connectivity is supported in documented Singapore Availability Zones.
+Singapore (`ap-southeast-1`) is the default live MVP Region because the current AgentCore matrix includes Harness and the core AgentCore capabilities needed by the design.
 
-Two current regional limitations matter:
+Current Registry reality:
 
-- AWS Agent Registry is GA in five regions only (Oregon, N. Virginia, Ireland, Tokyo and Sydney), not Singapore. Defer it or make a deliberate regional design later.
-- Guardrails inside AgentCore Policy are currently not supported in Singapore. Do not make that feature an MVP dependency.
+- AWS Agent Registry is GA in N. Virginia, Oregon, Ireland, Tokyo, and Sydney;
+- Singapore is not currently listed;
+- organization auto-detection is Region-scoped;
+- new Registry automation should use the GA `agent-registry` namespace, not the preview Registry namespace scheduled for retirement on 17 September 2026.
 
-Temporal Policy is supported in Singapore, but its policy-session propagation does not cross AgentCore account/Region boundaries. This favors keeping the Harness/Gateway/Runtime policy chain together in the same central account and region, while the governed tool uses normal STS to operate on target AWS accounts.
+Registry therefore remains a portable discovery/governance layer, not a first-MVP runtime dependency.
 
 ## Model decision
 
-Do not make Nova versus OpenAI an architecture choice. Harness can use Bedrock, OpenAI, Gemini and LiteLLM-compatible providers and can switch provider between turns.
+Do not make Nova versus another provider an architecture choice. Harness keeps model choice replaceable.
 
-Nova 2 Lite is a sensible low-cost candidate to benchmark, but AWS describes it as a cost-efficient model for simpler automation/document/support work. Nova Premier is positioned for more complex reasoning and agentic workflows. Therefore, do not assume an Amazon model is automatically better at AWS operations.
+Nova 2 Lite is a sensible low-cost candidate to benchmark. Compare it with one stronger Bedrock/Harness model on actual AWS Copilot tasks:
 
-Use a small benchmark of our actual tasks: identify a control, select the correct tool, explain the risk, produce the bounded recommendation, and interpret the AWS response. Security enforcement must remain in Gateway Policy + IAM regardless of which model wins.
+- correct control interpretation;
+- correct tool choice;
+- bounded recommendation;
+- refusal when evidence is missing;
+- correct DENY interpretation;
+- correct provider-verification interpretation;
+- latency and cost.
+
+Security enforcement remains Gateway Policy + exact tools + IAM regardless of which model performs best.
 
 ## Research files
 
-- [AGENTCORE_ARCHITECTURE.md](./AGENTCORE_ARCHITECTURE.md) — target architecture and native AgentCore components.
-- [MVP_ROADMAP.md](./MVP_ROADMAP.md) — recommended product phases and boundaries.
-- [KIRO_REVIEW_PROMPT.md](./KIRO_REVIEW_PROMPT.md) — copy-friendly independent AWS-native review prompt.
-- [SOURCES.md](./SOURCES.md) — official sources used for this research.
+- [AGENTCORE_ARCHITECTURE.md](./AGENTCORE_ARCHITECTURE.md) — original target architecture and native AgentCore components.
+- [MVP_ROADMAP.md](./MVP_ROADMAP.md) — original proposed product phases and boundaries.
+- [DEEP_RESEARCH_2026-09-09.md](./DEEP_RESEARCH_2026-09-09.md) — reviewed latest AgentCore/Registry/Organizations/security-service addendum and revised milestones.
+- [KIRO_REVIEW_PROMPT.md](./KIRO_REVIEW_PROMPT.md) — first independent AWS-native review prompt.
+- [KIRO_DEEP_REVIEW_PROMPT_2026-09-09.md](./KIRO_DEEP_REVIEW_PROMPT_2026-09-09.md) — current deep review prompt with read-only Organizations/Registry discovery.
+- [SOURCES.md](./SOURCES.md) — original official source inventory; the deep-research addendum contains the additional sources reviewed.
 
-## Decision gate before creating the new repo
+## Current decision gate before creating the new repo
 
-Ask Kiro to challenge this packet. Create the clean long-term repository only after we have answers to these four questions:
+Give Kiro the **deep review prompt** and close these final questions:
 
-1. Is Harness-first the fastest correct path for the first Compliance Agent?
-2. What is the smallest AgentCore-native way to put the **actual** remediation tool behind Gateway Policy?
-3. Is central-account AgentCore + member-account STS roles the right design for our 14-50+ account environment?
-4. Which AgentCore features should be deliberately deferred because of Singapore support, complexity or lack of demonstrated need?
+1. Which current member account is the best personal MVP security/tooling host, or is a dedicated member account materially better?
+2. Is Singapore Harness + MCP Gateway + Policy + exact Lambda tools still the smallest correct vertical slice?
+3. Is central AgentCore + STS + StackSets the right 14-50+ account pattern?
+4. Should Registry remain deferred, or is a small Sydney catalog experiment worth doing before Singapore Registry exists?
+5. Which provider-native security sources should enter milestones 2-4, and which custom scanner logic should never be built?
+6. Is there any newer AgentCore/AWS native capability that removes more custom code from the proposed MVP?
+
+After that review, freeze Architecture Decision v1 and create the clean long-term repository.
