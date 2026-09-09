@@ -5,9 +5,9 @@
 Build a small, understandable internal AI platform POC following `ROADMAP.md`.
 Follow KISS and optimize for a 3-5 minute demo.
 
-The active implementation milestone is Issue #46: replace the synthetic
-read-only security finding with one real AWS security/compliance signal while
-reusing the merged M1-M7 platform and demo path.
+The active implementation milestone is Issue #46: complete one real AWS
+Security Group governance lifecycle while reusing the merged M1-M7 platform
+and demo path.
 
 ## Scope
 
@@ -16,12 +16,20 @@ reusing the merged M1-M7 platform and demo path.
   and validation paths before adding another framework.
 - Reuse the merged M1-M7 governed workflow and final demo rather than rebuilding
   approval, Gateway Policy, audit, developer-client, or controlled-action plumbing.
-- Issue #46 should choose exactly one already-available read-only AWS security
-  source and show a small sanitized result through the existing LibreChat path.
-- Keep the controlled remediation harmless/local for this milestone; do not turn
-  this into a real remediation engine yet.
-- Do not create, update, or delete AWS resources unless Amit separately
-  approves the exact mutation.
+- Issue #46 uses one fixed, dedicated, unattached demo Security Group. It may
+  read that Group and, only after native approval plus Gateway ALLOW, revoke
+  the single exact TCP/22-from-0.0.0.0/0 ingress rule and verify the result.
+- Do not turn this into a generic Security Group mutation capability, accept a
+  caller-selected resource/rule, or change any instance, ENI, route, public IP,
+  or workload.
+- An active Amit-approved Issue, PR, goal, task, or milestone authorizes the
+  normal scoped AWS, IAM, configuration, deployment, service-restart, and
+  validation changes needed to complete it. Do not request a second approval
+  for those implementation steps.
+- Stop and surface a decision only when a proposed action materially expands
+  the approved scope, changes the authorization/security model, needs a
+  different AWS profile/account/Region, creates an unrelated resource, or
+  would cause an unapproved external impact.
 - Cognito, hosting, many projects/providers, billing, RAG, Kubernetes, complex
   routing, broad observability, and generic AWS-assistant behavior remain out of
   scope unless a later roadmap milestone explicitly requires them.
@@ -40,8 +48,8 @@ reusing the merged M1-M7 platform and demo path.
   they do not authorize or select an AWS production profile/account/environment.
 - Do not switch to another AWS profile merely because a command is blocked.
   Record the blocker or ask Amit if a different context is genuinely required.
-- Bounded AWS changes that are part of an approved POC milestone are acceptable;
-  keep them narrow, intentional, and recorded.
+- Bounded AWS changes that are part of an approved POC milestone are authorized;
+  keep them narrow, intentional, and recorded without asking Amit again.
 - Before any AWS test, confirm the active identity/profile and Region. Do not
   print or commit sensitive identity values as evidence.
 

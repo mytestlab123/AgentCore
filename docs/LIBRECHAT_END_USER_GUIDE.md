@@ -3,8 +3,11 @@
 This guide explains how to create and use the small AgentCore governance demo
 in LibreChat. It is written for a three-to-five-minute demonstration.
 
-The demo is local/synthetic. The MCP tools do not call AWS, change AWS
-resources, read secrets, or delete real assets.
+The controlled-action demo uses one fixed, dedicated, unattached demo Security
+Group. Its read-only check calls `ec2:DescribeSecurityGroups`; after native
+approval and Gateway `ALLOW`, the controlled action can revoke only TCP/22 from
+`0.0.0.0/0` on that same Group and immediately verify the provider state. It
+does not accept a caller-selected AWS resource, read secrets, or delete assets.
 
 ## 1. Open LibreChat
 
@@ -69,12 +72,16 @@ You are the AgentCore governance demo assistant.
 
 Use only the agentcore_governance MCP tools for this demonstration.
 For a security check, call `check_security_finding` and return the MCP result
-verbatim. Do not invent AWS data or paraphrase the status label.
+verbatim. It is a real read-only unrestricted-SSH compliance result for the
+fixed dedicated demo Security Group. Do not invent AWS data or paraphrase the
+status label.
 For a dev remediation, call `apply_demo_remediation` with the requested host
 and `environment=dev`; do not ask for a ticket or confirmation. Let LibreChat's
 native approval prompt handle the human decision. While the native approval
 card is visible, do not make a second tool call. After approval, return the MCP
-result verbatim; do not paraphrase its status label.
+result verbatim; do not paraphrase its status label. The tool is limited to
+revoking only the fixed demo Group's TCP/22 rule from `0.0.0.0/0`, followed by
+an immediate provider verification.
 For prod remediation, include a `DEMO-*` ticket only when the user supplies
 one; otherwise do not call the tool.
 For a deletion request, call `delete_demo_asset` once with the requested host.
@@ -85,8 +92,8 @@ labels:
 
 - `ALLOW -` for a completed read-only check;
 - `ASK / REJECT -` when the human rejects remediation (no MCP call);
-- `ASK / APPROVE -` when the human approves remediation (one harmless local
-  effect);
+- `ASK / APPROVE -` when the human approves remediation (one exact AWS rule
+  revoke followed by provider verification);
 - `DENY -` when policy blocks a prohibited operation.
 
 Do not replace these labels with a generic apology or an unlabeled sentence.
@@ -152,8 +159,12 @@ Check the security finding for web-01.
 Expected behavior:
 
 - LibreChat allows the tool call immediately.
-- The response reports the synthetic finding for `web-01`.
+- The response reports real unrestricted TCP/22 compliance for the fixed demo
+  Security Group: rule, public source, `NON_COMPLIANT`/`COMPLIANT`, and one
+  exact recommendation.
 - The result is labelled `ALLOW`.
+- It must not show a Security Group ID, VPC ID, account ID, ARN, raw payload,
+  or credential.
 
 If this exact prompt returns only a generic readiness message, return to the
 Agent Builder and verify that the `agentcore_governance` MCP server and its
@@ -182,7 +193,7 @@ Expected behavior:
 - The model emits `apply_demo_remediation`; it does not ask for a ticket in
   `dev`.
 - Choose **Reject**.
-- The MCP server is not called.
+- The MCP server is not called and no AWS action is made.
 - The result is `ASK / Reject`.
 
 LibreChat's native UI can label a rejected pending tool call **Cancelled**.
@@ -205,13 +216,15 @@ Expected behavior:
 
 - LibreChat shows the native approval prompt again.
 - Choose **Approve**.
-- One harmless local demo state change is recorded.
-- The MCP response begins `ASK / APPROVE / ALLOW - Remediation completed` and
-  reports one MCP call, no AWS or infrastructure mutation, and no secret
-  access.
+- The MCP response begins `ASK / APPROVE / ALLOW - AWS remediation verified`.
+- It reports one MCP call, Gateway **ALLOW**, revocation of only TCP/22 from
+  `0.0.0.0/0` on the fixed demo Group, and immediate `COMPLIANT` provider
+  verification.
+- It must also say that no ENI, instance, route, public IP, workload, or secret
+  changed.
 - Under the result, read the **Compact audit** in this order: request, tool,
-  upstream execution authorization, Gateway **ALLOW**, one harmless local
-  backend effect, final `ASK / APPROVE / ALLOW` result.
+  human decision, Gateway **ALLOW**, exact AWS action, final provider
+  verification.
 
 ### DENY: Gateway blocks a submitted controlled request
 
@@ -227,8 +240,8 @@ Expected behavior:
   **Submit** so the controlled request reaches the independent Gateway check.
 - The Gateway returns **DENY** for `prod`.
 - The result begins `DENY - Gateway Policy blocked remediation`.
-- Its **Compact audit** shows Gateway **DENY** and local demo effect **not
-  recorded**. The previous successful `dev` effect count does not increase.
+- Its **Compact audit** shows Gateway **DENY** and exact AWS action **not
+  called**. No Security Group rule changes.
 
 This is different from a **Reject** card: Reject stops the MCP server before it
 is called, while this test proves a submitted request is independently blocked
@@ -281,12 +294,14 @@ the retained Gateway still denies the `prod` request as described above.
 | `ALLOW` | Read-only operation is pre-approved | Tool runs immediately |
 | `ASK` | Operation needs a human decision | Native approval prompt appears |
 | `ASK / Reject` | Human refused the request | Tool does not run |
-| `ASK / Approve` | Human approved the request | Harmless local demo state changes |
+| `ASK / Approve` | Human approved the request | One exact demo-only SSH rule revoke, then provider verification |
 | `DENY` | Operation is prohibited | Tool is blocked before execution |
 
-The model does not receive AWS credentials and does not execute shell, CLI, or
-Python commands. LibreChat enforces the native policy and calls the local MCP
-demo server only after the policy decision.
+The model does not receive AWS credentials and cannot choose a shell command,
+CLI command, Security Group, or rule. LibreChat enforces the native policy and
+calls the local MCP server only after the policy decision; the server's fixed
+implementation uses the host role solely for the declared exact provider read
+and exact fixed-rule revoke.
 
 ## 6. Read the compact audit correctly
 
@@ -297,14 +312,15 @@ request -> tool -> human decision -> Gateway decision -> backend -> final result
 ```
 
 - Read-only `ALLOW` has **not required** for the human and Gateway steps; its
-  backend evidence is the sanitized STS identity read.
+  backend evidence is the sanitized `ec2:DescribeSecurityGroups` result for
+  the fixed demo Security Group.
 - A native **Reject** has no MCP result because the server is intentionally not
-  called. The LibreChat `Cancelled` approval card is the evidence; no local
-  effect is recorded.
-- A `dev` **Approve** result shows Gateway `ALLOW` and exactly one harmless
-  local marker.
-- A submitted `prod` request shows Gateway `DENY` and no additional local
-  marker.
+  called. The LibreChat `Cancelled` approval card is the evidence; no AWS
+  action is made.
+- A `dev` **Approve** result shows Gateway `ALLOW`, the one exact fixed-rule
+  revoke, and provider verification of `COMPLIANT`.
+- A submitted `prod` request shows Gateway `DENY` and does not call the exact
+  AWS revoke.
 
 The audit is a compact demo record, not a new observability platform. It never
 contains AWS identities, endpoints, credentials, or secrets.
@@ -351,10 +367,14 @@ POC.
 
 ## 9. Safe operating boundaries
 
-- Use only the synthetic `web-01` demo value.
+- Use only the fixed `web-01` tool input and the configured dedicated demo
+  Security Group. Do not point this agent at a production Security Group.
 - Do not paste AWS keys, bearer tokens, passwords, or private endpoints into
   agent instructions or chat messages.
-- Do not claim that this demo proves AWS IAM authorization or real remediation.
+- This demo performs exactly one real remediation only after native approval
+  and Gateway `ALLOW`: revoke TCP/22 from `0.0.0.0/0` on its fixed dedicated
+  demo Group, followed by direct provider verification. Do not use it for any
+  other Security Group or rule.
 - Do not attach real production MCP servers to this demo agent.
 - Do not enable public sharing for the agent.
 - The local state file is private operator state and must remain mode `600` in a
@@ -366,6 +386,11 @@ The implementation contract and native configuration example are in:
 
 - `integration/librechat-governance/librechat.yaml.example`
 - `integration/librechat-governance/README.md`
+
+After a successful approved demo, only the operator may restore the intentional
+unrestricted SSH rule for the next run. The exact direct AWS CLI reset shape is
+in `docs/ISSUE46_REAL_AWS_SECURITY_SIGNAL.md`. It is not a LibreChat tool and
+must use the private ID of the fixed unattached demo Security Group.
 - `docs/ISSUE24_GOVERNANCE_PROOF.md`
 
 Run the offline regression proof from the repository root:
@@ -374,9 +399,10 @@ Run the offline regression proof from the repository root:
 python3 integration/librechat-governance/test_governance.py
 ```
 
-The test proves the deterministic policy patterns, hook decisions, local ALLOW
-and approved-effect behavior, and private state-file permissions. A browser
-screenshot supports UI evidence but does not prove AWS execution.
+The test proves deterministic policy patterns, hook decisions, Security Group
+sanitization/evaluation, local approved-effect behavior, and private state-file
+permissions. A browser screenshot supports UI evidence but does not prove the
+live AWS query.
 
 ## Official references
 

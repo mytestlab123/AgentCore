@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Small stdio MCP server for the governed AgentCore demonstration.
 
-The server deliberately has a narrow surface: one sanitized read-only AWS STS
-check, one retained AgentCore Gateway decision check, and one local demo-state
-marker.  It never creates or mutates AWS resources.
+The server deliberately has a narrow surface: one sanitized Security Group
+SSH-compliance check, one retained AgentCore Gateway decision check, and one
+exact Security Group ingress revoke. It never accepts a caller-selected AWS
+resource or generic AWS command.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from typing import Any
 from gateway_runtime_client import GatewayRuntimeBlocked, verify_gateway as invoke_gateway_runtime
 
 REGION_PATTERN = re.compile(r"^[a-z]{2}(?:-gov)?-[a-z]+-\d$")
+SECURITY_GROUP_ID_PATTERN = re.compile(r"^sg-[0-9a-f]{8}(?:[0-9a-f]{9})?$")
 
 
 class GovernanceBlocked(RuntimeError):
@@ -27,7 +29,11 @@ class GovernanceBlocked(RuntimeError):
 TOOLS = [
     {
         "name": "check_security_finding",
-        "description": "Read-only finding lookup plus a sanitized AWS STS identity check for web-01.",
+        "description": (
+            "Read-only unrestricted-SSH compliance check for the fixed dedicated "
+            "demo Security Group. Returns only sanitized rule, source, compliance, "
+            "and recommendation data for web-01."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {"host": {"type": "string", "enum": ["web-01"]}},
@@ -37,14 +43,14 @@ TOOLS = [
     {
         "name": "apply_demo_remediation",
         "description": (
-            "Harmless local demo effect. For environment=dev, native approval and "
-            "the retained AgentCore Gateway must allow this tool before it can "
-            "record one local marker. Call this tool "
+            "For environment=dev, native approval and the retained AgentCore Gateway "
+            "must allow this tool before it can revoke only TCP/22 from 0.0.0.0/0 "
+            "on the fixed dedicated demo Security Group, then verify compliance. Call this tool "
             "directly with host and environment; ticket is optional. Do not "
             "ask the user to confirm; native LibreChat approval handles the "
             "decision. For environment=prod, ticket must start with DEMO-."
             " After approval, the result begins `ASK / APPROVE`; a native "
-            "Reject means this server is not called and no effect is recorded."
+            "Reject means this server is not called and no AWS change is made."
         ),
         "inputSchema": {
             "type": "object",
@@ -57,7 +63,7 @@ TOOLS = [
                 "environment": {
                     "type": "string",
                     "enum": ["dev", "prod"],
-                    "description": "Use dev for the harmless default proof.",
+                    "description": "Use dev for the fixed demo Security Group remediation proof.",
                 },
                 "ticket": {
                     "type": "string",
@@ -111,6 +117,8 @@ def empty_state() -> dict[str, Any]:
         "remediation_calls": 0,
         "delete_calls": 0,
         "remediated": False,
+        "aws_remediation_attempts": 0,
+        "aws_remediation_verified": False,
         "audit_events": [],
     }
 
@@ -183,25 +191,110 @@ def aws_region() -> str:
     return region
 
 
-def read_aws_identity(*, runner: Any = subprocess.run) -> dict[str, str]:
-    """Run a fixed read-only identity query and discard all identity values."""
+def security_group_id() -> str:
+    value = os.environ.get("GOVERNANCE_SECURITY_GROUP_ID", "")
+    if not SECURITY_GROUP_ID_PATTERN.fullmatch(value):
+        raise GovernanceBlocked("required demo Security Group setting is absent or invalid")
+    return value
+
+
+def unrestricted_ssh_sources(permissions: Any) -> list[str]:
+    """Return only the fixed public CIDRs that make TCP/22 non-compliant."""
+    if not isinstance(permissions, list):
+        raise GovernanceBlocked("Security Group ingress rules are invalid")
+    sources: list[str] = []
+    for permission in permissions:
+        if not isinstance(permission, dict) or permission.get("IpProtocol") != "tcp":
+            continue
+        from_port = permission.get("FromPort")
+        to_port = permission.get("ToPort")
+        if not isinstance(from_port, int) or not isinstance(to_port, int) or not from_port <= 22 <= to_port:
+            continue
+        for range_value in permission.get("IpRanges", []):
+            if isinstance(range_value, dict) and range_value.get("CidrIp") == "0.0.0.0/0":
+                sources.append("0.0.0.0/0")
+        for range_value in permission.get("Ipv6Ranges", []):
+            if isinstance(range_value, dict) and range_value.get("CidrIpv6") == "::/0":
+                sources.append("::/0")
+    return list(dict.fromkeys(sources))
+
+
+def read_security_group_ssh(*, runner: Any = subprocess.run) -> dict[str, str]:
+    """Read one fixed Security Group and return a deliberately tiny safe result."""
     require_setting("GOVERNANCE_AWS_READ_ENABLED")
-    completed = runner(
-        ["aws", "sts", "get-caller-identity", "--region", aws_region(), "--output", "json", "--no-cli-pager"],
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=20,
-    )
-    if completed.returncode != 0:
-        raise GovernanceBlocked("read-only AWS identity query failed")
     try:
-        identity = json.loads(completed.stdout)
+        completed = runner(
+            [
+                "aws", "ec2", "describe-security-groups", "--group-ids", security_group_id(),
+                "--region", aws_region(), "--output", "json", "--no-cli-pager",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise GovernanceBlocked("read-only Security Group query could not run") from exc
+    if completed.returncode != 0:
+        raise GovernanceBlocked("read-only Security Group query failed")
+    try:
+        payload = json.loads(completed.stdout)
     except (TypeError, json.JSONDecodeError) as exc:
-        raise GovernanceBlocked("read-only AWS identity query returned invalid JSON") from exc
-    if not all(isinstance(identity.get(key), str) and identity[key] for key in ("Account", "Arn", "UserId")):
-        raise GovernanceBlocked("read-only AWS identity query returned an incomplete identity")
-    return {"api": "sts:GetCallerIdentity", "result": "identity verified", "mutation": "none"}
+        raise GovernanceBlocked("read-only Security Group query returned invalid JSON") from exc
+    groups = payload.get("SecurityGroups") if isinstance(payload, dict) else None
+    if not isinstance(groups, list) or len(groups) != 1 or not isinstance(groups[0], dict):
+        raise GovernanceBlocked("read-only Security Group query returned an unexpected result")
+    sources = unrestricted_ssh_sources(groups[0].get("IpPermissions"))
+    if sources:
+        return {
+            "api": "ec2:DescribeSecurityGroups",
+            "rule": "TCP/22",
+            "source": ", ".join(sources),
+            "compliance": "NON_COMPLIANT",
+            "recommendation": "Remove the unrestricted TCP/22 ingress rule from the dedicated demo Security Group.",
+            "mutation": "none",
+        }
+    return {
+        "api": "ec2:DescribeSecurityGroups",
+        "rule": "TCP/22",
+        "source": "none",
+        "compliance": "COMPLIANT",
+        "recommendation": "No unrestricted TCP/22 ingress rule is present on the dedicated demo Security Group.",
+        "mutation": "none",
+    }
+
+
+def revoke_unrestricted_ssh_ingress(*, runner: Any = subprocess.run) -> None:
+    """Revoke only the fixed IPv4 SSH rule from the fixed configured Group."""
+    require_setting("GOVERNANCE_AWS_REMEDIATION_ENABLED")
+    exact_permission = json.dumps([{
+        "IpProtocol": "tcp",
+        "FromPort": 22,
+        "ToPort": 22,
+        "IpRanges": [{"CidrIp": "0.0.0.0/0"}],
+    }], separators=(",", ":"))
+    try:
+        completed = runner(
+            [
+                "aws", "ec2", "revoke-security-group-ingress", "--group-id", security_group_id(),
+                "--ip-permissions", exact_permission, "--region", aws_region(),
+                "--output", "json", "--no-cli-pager",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise GovernanceBlocked("exact Security Group ingress revoke could not run") from exc
+    if completed.returncode != 0:
+        raise GovernanceBlocked("exact Security Group ingress revoke was not confirmed")
+
+
+def has_unrestricted_ipv4_ssh(result: dict[str, str]) -> bool:
+    return result.get("compliance") == "NON_COMPLIANT" and "0.0.0.0/0" in {
+        source.strip() for source in result.get("source", "").split(",")
+    }
 
 
 def verify_gateway(environment: str, *, runner: Any = subprocess.run) -> str:
@@ -212,11 +305,11 @@ def verify_gateway(environment: str, *, runner: Any = subprocess.run) -> str:
         raise GovernanceBlocked("retained Gateway policy verification failed") from exc
 
 
-def blocked_result(title: str) -> dict[str, Any]:
+def blocked_result(title: str, *, aws_mutation: str = "none") -> dict[str, Any]:
     return text_result(
         f"## BLOCKED - {title}\n\n"
         "- No local demo effect was recorded\n"
-        "- No AWS or infrastructure mutation was made\n"
+        f"- AWS or infrastructure mutation: **{aws_mutation}**\n"
         "- Check the private runtime prerequisites; details are intentionally not exposed.",
         error=True,
     )
@@ -226,7 +319,8 @@ def call_tool(
     name: str,
     args: dict[str, Any],
     *,
-    aws_read: Any | None = None,
+    security_group_read: Any | None = None,
+    security_group_revoke: Any | None = None,
     gateway_check: Any | None = None,
 ) -> dict[str, Any]:
     state = load_state()
@@ -236,36 +330,37 @@ def call_tool(
 
     if name == "check_security_finding":
         try:
-            aws_result = (aws_read or read_aws_identity)()
+            security_result = (security_group_read or read_security_group_ssh)()
         except GovernanceBlocked:
-            return blocked_result("read-only AWS identity check unavailable")
+            return blocked_result("read-only Security Group compliance check unavailable")
         state["finding_calls"] += 1
         record_audit(
             state,
-            request="read-only security finding for `web-01`",
+            request="read-only unrestricted-SSH compliance check for `web-01`",
             tool=name,
             human_decision="**not required** (read-only)",
             gateway_decision="**not required** (no controlled action)",
-            backend="sanitized `sts:GetCallerIdentity`; mutation **none**",
-            final_result="**ALLOW** — finding returned",
+            backend="sanitized `ec2:DescribeSecurityGroups`; mutation **none**",
+            final_result=f"**ALLOW** — {security_result['compliance']} result returned",
         )
         save_state(state)
         return text_result(
-            "## ALLOW - Security finding and AWS read returned\n\n"
+            "## ALLOW - Real SSH compliance result returned\n\n"
             "- Host: `web-01`\n"
-            "- Severity: **HIGH**\n"
-            "- Finding: `demo-cve-2026-0001`\n"
-            "- Recommended action: patch package `demo-lib`\n"
-            f"- AWS API: `{aws_result['api']}` ({aws_result['result']})\n"
+            f"- Rule: `{security_result['rule']}`\n"
+            f"- Source: `{security_result['source']}`\n"
+            f"- Compliance: **{security_result['compliance']}**\n"
+            f"- Recommended action: {security_result['recommendation']}\n"
+            f"- AWS API: `{security_result['api']}`\n"
             "- MCP tool calls: **1**\n"
             "- AWS or infrastructure mutation: **none**\n\n"
             + audit_markdown(
-                request="read-only security finding for `web-01`",
+                request="read-only unrestricted-SSH compliance check for `web-01`",
                 tool=name,
                 human_decision="**not required** (read-only)",
                 gateway_decision="**not required** (no controlled action)",
-                backend="sanitized `sts:GetCallerIdentity`; mutation **none**",
-                final_result="**ALLOW** — finding returned",
+                backend="sanitized `ec2:DescribeSecurityGroups`; mutation **none**",
+                final_result=f"**ALLOW** — {security_result['compliance']} result returned",
             )
         )
 
@@ -287,7 +382,7 @@ def call_tool(
                 tool=name,
                 human_decision="tool reached the server; native Reject would stop before this point",
                 gateway_decision="**DENY**",
-                backend="local demo effect **not recorded**",
+                backend="AWS action **not called**",
                 final_result="**DENY** — Gateway blocked remediation",
             )
             save_state(state)
@@ -296,46 +391,112 @@ def call_tool(
                 f"- Host: `{host}`\n"
                 f"- Environment: `{environment}`\n"
                 "- Gateway decision: **DENY**\n"
-                "- Local demo effect recorded: **no**\n"
+                "- Exact AWS revoke called: **no**\n"
                 "- AWS or infrastructure mutation: **none**\n\n"
                 + audit_markdown(
                     request=f"controlled remediation for `{host}` in `{environment}`",
                     tool=name,
                     human_decision="tool reached the server; native Reject would stop before this point",
                     gateway_decision="**DENY**",
-                    backend="local demo effect **not recorded**",
+                    backend="AWS action **not called**",
                     final_result="**DENY** — Gateway blocked remediation",
                 ),
                 error=True,
             )
+        reader = security_group_read or read_security_group_ssh
+        revoker = security_group_revoke or revoke_unrestricted_ssh_ingress
+        try:
+            before = reader()
+        except GovernanceBlocked:
+            return blocked_result("provider pre-check unavailable")
+        if not has_unrestricted_ipv4_ssh(before):
+            return blocked_result("exact unrestricted TCP/22 rule is not present")
+
+        # Persist the attempted controlled action before the AWS call, so a
+        # later provider-verification failure can never be misreported as no call.
         state["remediation_calls"] += 1
-        state["remediated"] = True
-        record_audit(
-            state,
-            request=f"controlled remediation for `{host}` in `{environment}`",
-            tool=name,
-            human_decision="tool reached the server; native Reject would stop before this point",
-            gateway_decision="**ALLOW**",
-            backend="one harmless local demo effect recorded",
-            final_result="**ASK / APPROVE / ALLOW** — remediation completed",
-        )
+        state["aws_remediation_attempts"] += 1
         save_state(state)
-        return text_result(
-            "## ASK / APPROVE / ALLOW - Remediation completed\n\n"
-            f"- Host: `{host}`\n"
-            f"- Environment: `{environment}`\n"
-            "- Result: **one harmless local demo effect recorded**\n"
-            "- Gateway decision: **ALLOW**\n"
-            "- MCP tool calls: **1** (after approval)\n"
-            "- AWS or infrastructure mutation: **none**\n"
-            "- Secrets accessed: **none**\n\n"
-            + audit_markdown(
-                request=f"controlled remediation for `{host}` in `{environment}`",
+        try:
+            revoker()
+        except GovernanceBlocked:
+            record_audit(
+                state,
+                request=f"exact TCP/22 revoke for `{host}` in `{environment}`",
                 tool=name,
                 human_decision="tool reached the server; native Reject would stop before this point",
                 gateway_decision="**ALLOW**",
-                backend="one harmless local demo effect recorded",
-                final_result="**ASK / APPROVE / ALLOW** — remediation completed",
+                backend="exact AWS revoke attempted; provider verification unavailable",
+                final_result="**BLOCKED** — AWS action status could not be verified",
+            )
+            save_state(state)
+            return blocked_result(
+                "exact AWS revoke could not be verified",
+                aws_mutation="exact revoke attempted; provider verification unavailable",
+            )
+        try:
+            after = reader()
+        except GovernanceBlocked:
+            record_audit(
+                state,
+                request=f"exact TCP/22 revoke for `{host}` in `{environment}`",
+                tool=name,
+                human_decision="tool reached the server; native Reject would stop before this point",
+                gateway_decision="**ALLOW**",
+                backend="exact AWS revoke completed; provider re-read unavailable",
+                final_result="**BLOCKED** — provider verification unavailable",
+            )
+            save_state(state)
+            return blocked_result(
+                "provider verification unavailable after exact AWS revoke",
+                aws_mutation="exact TCP/22 revoke completed; final provider state unavailable",
+            )
+        if after.get("compliance") != "COMPLIANT":
+            record_audit(
+                state,
+                request=f"exact TCP/22 revoke for `{host}` in `{environment}`",
+                tool=name,
+                human_decision="tool reached the server; native Reject would stop before this point",
+                gateway_decision="**ALLOW**",
+                backend="exact AWS revoke completed; provider still reports NON_COMPLIANT",
+                final_result="**BLOCKED** — final provider verification is not compliant",
+            )
+            save_state(state)
+            return blocked_result(
+                "provider verification is not compliant after exact AWS revoke",
+                aws_mutation="exact TCP/22 revoke completed; provider still reports NON_COMPLIANT",
+            )
+
+        state["remediated"] = True
+        state["aws_remediation_verified"] = True
+        record_audit(
+            state,
+            request=f"exact TCP/22 revoke for `{host}` in `{environment}`",
+            tool=name,
+            human_decision="tool reached the server; native Reject would stop before this point",
+            gateway_decision="**ALLOW**",
+            backend="revoked exact TCP/22 from 0.0.0.0/0; provider re-read COMPLIANT",
+            final_result="**ASK / APPROVE / ALLOW** — AWS remediation verified COMPLIANT",
+        )
+        save_state(state)
+        return text_result(
+            "## ASK / APPROVE / ALLOW - AWS remediation verified\n\n"
+            f"- Host: `{host}`\n"
+            f"- Environment: `{environment}`\n"
+            "- Exact AWS action: **revoked TCP/22 from `0.0.0.0/0` on the fixed dedicated demo Security Group**\n"
+            "- Gateway decision: **ALLOW**\n"
+            "- MCP tool calls: **1** (after approval)\n"
+            "- Provider verification: **COMPLIANT** (unrestricted TCP/22 absent)\n"
+            "- AWS or infrastructure mutation: **one exact dedicated Security Group ingress revoke**\n"
+            "- ENI, instance, route, public IP, and workload changes: **none**\n"
+            "- Secrets accessed: **none**\n\n"
+            + audit_markdown(
+                request=f"exact TCP/22 revoke for `{host}` in `{environment}`",
+                tool=name,
+                human_decision="tool reached the server; native Reject would stop before this point",
+                gateway_decision="**ALLOW**",
+                backend="revoked exact TCP/22 from 0.0.0.0/0; provider re-read COMPLIANT",
+                final_result="**ASK / APPROVE / ALLOW** — AWS remediation verified COMPLIANT",
             )
         )
 

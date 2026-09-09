@@ -1,6 +1,64 @@
 # AgentCore Test Proof
 
-Last verified: 8 September 2026, 16:27 SGT
+Last verified: 8 September 2026, 22:24 SGT
+
+## Issue #46 real Security Group SSH signal — live host proof
+
+Last verified: 8 September 2026, 22:24 SGT
+
+The deployed LibreChat MCP source was updated to PR #47 commit `40da67d`.
+The dedicated demo Security Group remains intentionally unattached and is reset
+to its intentional unrestricted TCP/22 ingress state after proof. The host
+instance role has only the required read-only `ec2:DescribeSecurityGroups`
+List permission plus `ec2:RevokeSecurityGroupIngress` restricted to the
+fixed private demo Security Group. The MCP implementation still hard-binds both
+operations to that private Group ID and the exact TCP/22-from-`0.0.0.0/0`
+permission.
+
+| Step | Observed result |
+| --- | --- |
+| Local real AWS implementation path | sanitized `TCP/22` / `0.0.0.0/0` / `NON_COMPLIANT`; mutation `none` |
+| Deterministic validation | `./scripts/check.sh` PASS; `git diff --check` PASS |
+| Host role authorization | exact revoke dry-run PASS; mutation `none` |
+| Deployed live approved path | Gateway `dev` ALLOW; exact TCP/22 IPv4 rule revoked |
+| Provider verification | MCP re-read and independent direct read both `COMPLIANT` |
+| Operator reset | direct `amit` CLI restored only TCP/22 from `0.0.0.0/0` |
+| Post-reset provider state | `NON_COMPLIANT`; ENI attachments `0` |
+| Submitted synthetic prod request | Gateway `DENY`; exact AWS revoke not called |
+| LibreChat availability after recovery | host port 80 and HTTP `200` |
+
+The only intended AWS state changes in this proof were: (1) the fixed demo
+Group's exact TCP/22-from-`0.0.0.0/0` rule was revoked once after Gateway
+`dev` ALLOW, and (2) the same rule was restored once by the documented
+operator-only CLI reset. No instance, ENI attachment, route, public IP,
+workload, secret, or other Security Group rule changed.
+
+Native UI acceptance also passed in Amit's authenticated LibreChat session:
+the first real read returned `NON_COMPLIANT`; the `dev` remediation showed the
+native `ASK` card; **Approve** + **Submit** returned verified `COMPLIANT`; and
+the subsequent real read returned `COMPLIANT`. The operator-only reset was then
+run again and verified the intended repeatable `NON_COMPLIANT` starting state.
+
+The initial native ASK card used stale Issue #24 wording that incorrectly
+described a harmless local effect. The actual M8 backend action was nevertheless
+the exact verified Security Group revoke described above. PR #47 commit
+`d75b63f` corrected the deployed sole `toolApproval.reason`; the host verified
+the exact AWS-revoke wording and public LibreChat returned HTTP `200` after a
+controlled restart. One fresh native **Reject** card remains the smallest
+visible confirmation that the refreshed browser receives the corrected copy;
+Reject does not invoke MCP or change AWS state.
+
+Proof boundary: the native card is user-observed authenticated UI evidence. The
+repository browser runner tests only loopback-owned portal/Gateway applications
+and does not automate a separate authenticated LibreChat session.
+
+An additional isolated **Playwright Core** run against the deployed LibreChat
+URL returned HTTP `200` and reached `/login` (`AUTHENTICATION_BOUNDARY`). It
+did not reuse Amit's browser profile, cookie, or credentials; it therefore
+correctly did not see the Agent UI. The temporary Chrome profile and DevTools
+port were both removed after the run. Private evidence:
+
+`/home/user/.AGENTS-temp/AgentCore/librechat-playwright-e2e.B1HQaI/evidence/`
 
 ## Issue #44 compact Security Copilot audit — live backend proof
 
