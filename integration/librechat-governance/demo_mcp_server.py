@@ -17,7 +17,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from gateway_runtime_client import GatewayRuntimeBlocked, verify_gateway as invoke_gateway_runtime
+from gateway_runtime_client import (
+    DEMO_TARGET,
+    REMEDIATION_ACTION,
+    GatewayRuntimeBlocked,
+    verify_gateway as invoke_gateway_runtime,
+)
 
 REGION_PATTERN = re.compile(r"^[a-z]{2}(?:-gov)?-[a-z]+-\d$")
 SECURITY_GROUP_ID_PATTERN = re.compile(r"^sg-[0-9a-f]{8}(?:[0-9a-f]{9})?$")
@@ -44,7 +49,8 @@ TOOLS = [
         "name": "apply_demo_remediation",
         "description": (
             "For environment=dev, native approval and the retained AgentCore Gateway "
-            "must allow this tool before it can revoke only TCP/22 from 0.0.0.0/0 "
+            "must allow the fixed server-owned action=remove_unrestricted_ssh and "
+            "target=demo-security-group before it can revoke only TCP/22 from 0.0.0.0/0 "
             "on the fixed dedicated demo Security Group, then verify compliance. Call this tool "
             "directly with host and environment; ticket is optional. Do not "
             "ask the user to confirm; native LibreChat approval handles the "
@@ -378,7 +384,8 @@ def call_tool(
         if decision != "ALLOW":
             record_audit(
                 state,
-                request=f"controlled remediation for `{host}` in `{environment}`",
+                request=(f"controlled `{REMEDIATION_ACTION}` for `{DEMO_TARGET}` "
+                         f"on `{host}` in `{environment}`"),
                 tool=name,
                 human_decision="tool reached the server; native Reject would stop before this point",
                 gateway_decision="**DENY**",
@@ -390,11 +397,14 @@ def call_tool(
                 "## DENY - Gateway Policy blocked remediation\n\n"
                 f"- Host: `{host}`\n"
                 f"- Environment: `{environment}`\n"
+                f"- Server-owned action: `{REMEDIATION_ACTION}`\n"
+                f"- Server-owned target: `{DEMO_TARGET}`\n"
                 "- Gateway decision: **DENY**\n"
                 "- Exact AWS revoke called: **no**\n"
                 "- AWS or infrastructure mutation: **none**\n\n"
                 + audit_markdown(
-                    request=f"controlled remediation for `{host}` in `{environment}`",
+                    request=(f"controlled `{REMEDIATION_ACTION}` for `{DEMO_TARGET}` "
+                             f"on `{host}` in `{environment}`"),
                     tool=name,
                     human_decision="tool reached the server; native Reject would stop before this point",
                     gateway_decision="**DENY**",
@@ -410,7 +420,39 @@ def call_tool(
         except GovernanceBlocked:
             return blocked_result("provider pre-check unavailable")
         if not has_unrestricted_ipv4_ssh(before):
-            return blocked_result("exact unrestricted TCP/22 rule is not present")
+            state["remediation_calls"] += 1
+            record_audit(
+                state,
+                request=(f"controlled `{REMEDIATION_ACTION}` for `{DEMO_TARGET}` "
+                         f"on `{host}` in `{environment}`"),
+                tool=name,
+                human_decision="tool reached the server after native approval",
+                gateway_decision="**ALLOW**",
+                backend="provider pre-check COMPLIANT; exact AWS revoke **not called**",
+                final_result="**ASK / APPROVE / ALLOW** — NO_REMEDIATION_REQUIRED",
+            )
+            save_state(state)
+            return text_result(
+                "## ASK / APPROVE / ALLOW - NO_REMEDIATION_REQUIRED\n\n"
+                f"- Host: `{host}`\n"
+                f"- Environment: `{environment}`\n"
+                f"- Server-owned action: `{REMEDIATION_ACTION}`\n"
+                f"- Server-owned target: `{DEMO_TARGET}`\n"
+                "- Gateway decision: **ALLOW**\n"
+                "- Provider verification: **COMPLIANT** (unrestricted TCP/22 absent)\n"
+                "- Exact AWS revoke called: **no**\n"
+                "- AWS or infrastructure mutation: **none**\n"
+                "- The non-compliant rule was not recreated.\n\n"
+                + audit_markdown(
+                    request=(f"controlled `{REMEDIATION_ACTION}` for `{DEMO_TARGET}` "
+                             f"on `{host}` in `{environment}`"),
+                    tool=name,
+                    human_decision="tool reached the server after native approval",
+                    gateway_decision="**ALLOW**",
+                    backend="provider pre-check COMPLIANT; exact AWS revoke **not called**",
+                    final_result="**ASK / APPROVE / ALLOW** — NO_REMEDIATION_REQUIRED",
+                )
+            )
 
         # Persist the attempted controlled action before the AWS call, so a
         # later provider-verification failure can never be misreported as no call.
@@ -422,7 +464,8 @@ def call_tool(
         except GovernanceBlocked:
             record_audit(
                 state,
-                request=f"exact TCP/22 revoke for `{host}` in `{environment}`",
+                request=(f"`{REMEDIATION_ACTION}` for `{DEMO_TARGET}` "
+                         f"on `{host}` in `{environment}`"),
                 tool=name,
                 human_decision="tool reached the server; native Reject would stop before this point",
                 gateway_decision="**ALLOW**",
@@ -439,7 +482,8 @@ def call_tool(
         except GovernanceBlocked:
             record_audit(
                 state,
-                request=f"exact TCP/22 revoke for `{host}` in `{environment}`",
+                request=(f"`{REMEDIATION_ACTION}` for `{DEMO_TARGET}` "
+                         f"on `{host}` in `{environment}`"),
                 tool=name,
                 human_decision="tool reached the server; native Reject would stop before this point",
                 gateway_decision="**ALLOW**",
@@ -454,7 +498,8 @@ def call_tool(
         if after.get("compliance") != "COMPLIANT":
             record_audit(
                 state,
-                request=f"exact TCP/22 revoke for `{host}` in `{environment}`",
+                request=(f"`{REMEDIATION_ACTION}` for `{DEMO_TARGET}` "
+                         f"on `{host}` in `{environment}`"),
                 tool=name,
                 human_decision="tool reached the server; native Reject would stop before this point",
                 gateway_decision="**ALLOW**",
@@ -471,7 +516,8 @@ def call_tool(
         state["aws_remediation_verified"] = True
         record_audit(
             state,
-            request=f"exact TCP/22 revoke for `{host}` in `{environment}`",
+            request=(f"`{REMEDIATION_ACTION}` for `{DEMO_TARGET}` "
+                     f"on `{host}` in `{environment}`"),
             tool=name,
             human_decision="tool reached the server; native Reject would stop before this point",
             gateway_decision="**ALLOW**",
@@ -483,6 +529,8 @@ def call_tool(
             "## ASK / APPROVE / ALLOW - AWS remediation verified\n\n"
             f"- Host: `{host}`\n"
             f"- Environment: `{environment}`\n"
+            f"- Server-owned action: `{REMEDIATION_ACTION}`\n"
+            f"- Server-owned target: `{DEMO_TARGET}`\n"
             "- Exact AWS action: **revoked TCP/22 from `0.0.0.0/0` on the fixed dedicated demo Security Group**\n"
             "- Gateway decision: **ALLOW**\n"
             "- MCP tool calls: **1** (after approval)\n"
@@ -491,7 +539,8 @@ def call_tool(
             "- ENI, instance, route, public IP, and workload changes: **none**\n"
             "- Secrets accessed: **none**\n\n"
             + audit_markdown(
-                request=f"exact TCP/22 revoke for `{host}` in `{environment}`",
+                request=(f"`{REMEDIATION_ACTION}` for `{DEMO_TARGET}` "
+                         f"on `{host}` in `{environment}`"),
                 tool=name,
                 human_decision="tool reached the server; native Reject would stop before this point",
                 gateway_decision="**ALLOW**",

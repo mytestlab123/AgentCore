@@ -25,10 +25,11 @@ URL_SUFFIX = f".gateway.bedrock-agentcore.{REGION}.amazonaws.com"
 SECURITY_GROUP_ID_PATTERN = re.compile(r"^sg-[0-9a-f]{8}(?:[0-9a-f]{9})?$")
 ALLOWED_TOP_LEVEL = {"command", "args", "env", "chatMenu"}
 APPROVAL_REASON = (
-    "ASK - Review {tool}. The parameters below target one fixed unattached demo Security Group: "
-    "blank ticket is valid in dev. Reject = no MCP call and no AWS change. Approve checks the "
-    "retained AgentCore Gateway first; only Gateway ALLOW revokes exact TCP/22 from 0.0.0.0/0 "
-    "and verifies COMPLIANT. No generic AWS mutation or secret access."
+    "ASK - Review {tool}. Fixed server-owned context: environment=dev, "
+    "action=remove_unrestricted_ssh, target=demo-security-group. Blank ticket is valid in dev. "
+    "Reject = no MCP call and no AWS change. Approve checks the retained AgentCore Gateway first; "
+    "only Gateway ALLOW may revoke exact TCP/22 from 0.0.0.0/0 and verifies COMPLIANT. "
+    "No generic AWS mutation or secret access."
 )
 
 

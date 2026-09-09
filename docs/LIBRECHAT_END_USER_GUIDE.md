@@ -8,6 +8,11 @@ Group. Its read-only check calls `ec2:DescribeSecurityGroups`; after native
 approval and Gateway `ALLOW`, the controlled action can revoke only TCP/22 from
 `0.0.0.0/0` on that same Group and immediately verify the provider state. It
 does not accept a caller-selected AWS resource, read secrets, or delete assets.
+The retained Gateway receives the fixed server-owned tuple
+`environment=dev`, `action=remove_unrestricted_ssh`, and
+`target=demo-security-group`; `dev` alone is not sufficient. If the Group is
+already `COMPLIANT`, the approved request is a truthful no-op: it does not
+recreate the rule or call the revoke API.
 
 ## 1. Open LibreChat
 
@@ -80,8 +85,10 @@ and `environment=dev`; do not ask for a ticket or confirmation. Let LibreChat's
 native approval prompt handle the human decision. While the native approval
 card is visible, do not make a second tool call. After approval, return the MCP
 result verbatim; do not paraphrase its status label. The tool is limited to
-revoking only the fixed demo Group's TCP/22 rule from `0.0.0.0/0`, followed by
-an immediate provider verification.
+the fixed Gateway tuple `environment=dev`, `action=remove_unrestricted_ssh`,
+and `target=demo-security-group`. Only that tuple may revoke the fixed demo
+Group's TCP/22 rule from `0.0.0.0/0`, followed by an immediate provider
+verification. Do not expose action or target as a user input.
 For prod remediation, include a `DEMO-*` ticket only when the user supplies
 one; otherwise do not call the tool.
 For a deletion request, call `delete_demo_asset` once with the requested host.
@@ -93,7 +100,7 @@ labels:
 - `ALLOW -` for a completed read-only check;
 - `ASK / REJECT -` when the human rejects remediation (no MCP call);
 - `ASK / APPROVE -` when the human approves remediation (one exact AWS rule
-  revoke followed by provider verification);
+  revoke followed by provider verification, or a `COMPLIANT` no-op);
 - `DENY -` when policy blocks a prohibited operation.
 
 Do not replace these labels with a generic apology or an unlabeled sentence.
@@ -216,15 +223,25 @@ Expected behavior:
 
 - LibreChat shows the native approval prompt again.
 - Choose **Approve**.
-- The MCP response begins `ASK / APPROVE / ALLOW - AWS remediation verified`.
-- It reports one MCP call, Gateway **ALLOW**, revocation of only TCP/22 from
-  `0.0.0.0/0` on the fixed demo Group, and immediate `COMPLIANT` provider
-  verification.
+- The MCP response begins either `ASK / APPROVE / ALLOW - AWS remediation
+  verified` or, when the retained Group is already compliant,
+  `ASK / APPROVE / ALLOW - NO_REMEDIATION_REQUIRED`.
+- It reports one MCP call and Gateway **ALLOW**. A non-compliant Group may
+  have only TCP/22 from `0.0.0.0/0` revoked before immediate `COMPLIANT`
+  provider verification. A compliant Group is a no-op: its result says
+  `Exact AWS revoke called: no` and `AWS or infrastructure mutation: none`.
 - It must also say that no ENI, instance, route, public IP, workload, or secret
   changed.
 - Under the result, read the **Compact audit** in this order: request, tool,
   human decision, Gateway **ALLOW**, exact AWS action, final provider
   verification.
+
+When the demo Group is already `COMPLIANT` (the normal retained state after a
+successful real demo), the expected response instead begins
+`ASK / APPROVE / ALLOW - NO_REMEDIATION_REQUIRED`. It must show the same fixed
+action/target/environment and Gateway **ALLOW**, then `Exact AWS revoke
+called: no`, `AWS or infrastructure mutation: none`, and that the bad rule was
+not recreated.
 
 ### DENY: Gateway blocks a submitted controlled request
 
@@ -294,7 +311,7 @@ the retained Gateway still denies the `prod` request as described above.
 | `ALLOW` | Read-only operation is pre-approved | Tool runs immediately |
 | `ASK` | Operation needs a human decision | Native approval prompt appears |
 | `ASK / Reject` | Human refused the request | Tool does not run |
-| `ASK / Approve` | Human approved the request | One exact demo-only SSH rule revoke, then provider verification |
+| `ASK / Approve` | Human approved the request | Provider verification; exact revoke only when the fixed Group is non-compliant |
 | `DENY` | Operation is prohibited | Tool is blocked before execution |
 
 The model does not receive AWS credentials and cannot choose a shell command,
@@ -317,8 +334,9 @@ request -> tool -> human decision -> Gateway decision -> backend -> final result
 - A native **Reject** has no MCP result because the server is intentionally not
   called. The LibreChat `Cancelled` approval card is the evidence; no AWS
   action is made.
-- A `dev` **Approve** result shows Gateway `ALLOW`, the one exact fixed-rule
-  revoke, and provider verification of `COMPLIANT`.
+- A `dev` **Approve** result shows Gateway `ALLOW` and provider verification
+  of `COMPLIANT`. It either reports the one exact fixed-rule revoke or the
+  explicit compliant no-op; the Group is never reset to create a demo result.
 - A submitted `prod` request shows Gateway `DENY` and does not call the exact
   AWS revoke.
 
@@ -338,8 +356,10 @@ ENDPOINTS=custom,agents
 
 After changing the setting:
 
-1. Restart the existing LibreChat backend.
-2. Confirm the site returns HTTP `200`.
+1. Restart the actual LibreChat Node backend and its governed MCP child, not
+   only a detached `npm` wrapper process.
+2. Confirm the site returns HTTP `200` and the fresh Node backend has exactly
+   one fresh `demo_mcp_server.py` child.
 3. Sign out and sign in again.
 4. Press `Ctrl+F5`.
 5. Open the top endpoint pill and select **Agents**.
@@ -372,9 +392,12 @@ POC.
 - Do not paste AWS keys, bearer tokens, passwords, or private endpoints into
   agent instructions or chat messages.
 - This demo performs exactly one real remediation only after native approval
-  and Gateway `ALLOW`: revoke TCP/22 from `0.0.0.0/0` on its fixed dedicated
-  demo Group, followed by direct provider verification. Do not use it for any
-  other Security Group or rule.
+  and Gateway `ALLOW` for the complete fixed tuple: revoke TCP/22 from
+  `0.0.0.0/0` on its fixed dedicated demo Group, followed by direct provider
+  verification. Do not use it for any other Security Group or rule.
+- Do not auto-reset the demo Group. When it is `COMPLIANT`, remediation must be
+  `NO_REMEDIATION_REQUIRED`; only the documented operator-only CLI reset may
+  restore the intentional non-compliant demo condition.
 - Do not attach real production MCP servers to this demo agent.
 - Do not enable public sharing for the agent.
 - The local state file is private operator state and must remain mode `600` in a
@@ -389,8 +412,9 @@ The implementation contract and native configuration example are in:
 
 After a successful approved demo, only the operator may restore the intentional
 unrestricted SSH rule for the next run. The exact direct AWS CLI reset shape is
-in `docs/ISSUE46_REAL_AWS_SECURITY_SIGNAL.md`. It is not a LibreChat tool and
-must use the private ID of the fixed unattached demo Security Group.
+`./scripts/rearm-demo-security-state.sh --approve-rearm`; the read-only status
+command is `--check`. It is not a LibreChat tool and refuses an attached or
+ambiguous demo Security Group.
 - `docs/ISSUE24_GOVERNANCE_PROOF.md`
 
 Run the offline regression proof from the repository root:

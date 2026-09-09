@@ -38,7 +38,8 @@ class GovernanceContractTests(unittest.TestCase):
             "checkpointer:",
             "type: mongo",
             "ASK - Review {tool}.",
-            "blank ticket is valid in dev",
+            "Fixed server-owned context: environment=dev, action=remove_unrestricted_ssh, target=demo-security-group",
+            "Blank ticket is valid in dev",
             "Reject = no MCP call and no AWS change",
             "GOVERNANCE_AWS_READ_ENABLED: required",
             "GOVERNANCE_AWS_REMEDIATION_ENABLED: required",
@@ -260,6 +261,8 @@ Promise.all([run({{environment:'dev'}}), run({{environment:'prod',ticket:''}}), 
             approved_text = approved["content"][0]["text"]
             self.assertIn("ASK / APPROVE / ALLOW - AWS remediation verified", approved_text)
             self.assertIn("Gateway decision: **ALLOW**", approved_text)
+            self.assertIn("Server-owned action: `remove_unrestricted_ssh`", approved_text)
+            self.assertIn("Server-owned target: `demo-security-group`", approved_text)
             self.assertIn("Provider verification: **COMPLIANT**", approved_text)
             self.assertEqual(revoked, [True])
             self.assertEqual(server.load_state()["remediation_calls"], 1)
@@ -279,6 +282,8 @@ Promise.all([run({{environment:'dev'}}), run({{environment:'prod',ticket:''}}), 
             self.assertIn("DENY - Gateway Policy blocked remediation", denied_text)
             self.assertIn("Gateway decision: **DENY**", denied_text)
             self.assertIn("Exact AWS revoke called: **no**", denied_text)
+            self.assertIn("Server-owned action: `remove_unrestricted_ssh`", denied_text)
+            self.assertIn("Server-owned target: `demo-security-group`", denied_text)
             self.assertEqual(denied_calls, [])
             self.assertEqual(server.load_state()["remediation_calls"], 1)
             self.assertEqual(server.load_state()["aws_remediation_attempts"], 1)
@@ -292,11 +297,39 @@ Promise.all([run({{environment:'dev'}}), run({{environment:'prod',ticket:''}}), 
             self.assertEqual(server.load_state()["delete_calls"], 0)
             self.assertEqual(server.state_path().stat().st_mode & 0o777, 0o600)
 
+    def test_compliant_remediation_is_gateway_allowed_no_op(self) -> None:
+        with tempfile.TemporaryDirectory() as temp, \
+                mock.patch.dict(os.environ, {"GOVERNANCE_STATE_FILE": str(Path(temp) / "state.json")}, clear=False):
+            calls: list[str] = []
+            result = server.call_tool(
+                "apply_demo_remediation", {"host": "web-01", "environment": "dev"},
+                gateway_check=lambda environment: "ALLOW",
+                security_group_read=lambda: {
+                    "api": "ec2:DescribeSecurityGroups", "rule": "TCP/22", "source": "none",
+                    "compliance": "COMPLIANT",
+                    "recommendation": "No unrestricted TCP/22 ingress rule is present on the dedicated demo Security Group.",
+                    "mutation": "none",
+                },
+                security_group_revoke=lambda: calls.append("revoke"),
+            )
+            text = result["content"][0]["text"]
+            self.assertIn("ASK / APPROVE / ALLOW - NO_REMEDIATION_REQUIRED", text)
+            self.assertIn("Server-owned action: `remove_unrestricted_ssh`", text)
+            self.assertIn("Server-owned target: `demo-security-group`", text)
+            self.assertIn("Exact AWS revoke called: **no**", text)
+            self.assertEqual(calls, [])
+            state = server.load_state()
+            self.assertEqual(state["remediation_calls"], 1)
+            self.assertEqual(state["aws_remediation_attempts"], 0)
+            self.assertFalse(state["remediated"])
+
     def test_runtime_gateway_client_uses_host_role_and_exact_decisions(self) -> None:
+        requests: list[dict] = []
         def gateway_envelope(environment: str) -> str:
             if environment == "dev":
                 nested = {"statusCode": 200, "body": json.dumps({
-                    "environment": "dev", "status": "healthy", "source": "synthetic-demo"})}
+                    "environment": "dev", "action": "remove_unrestricted_ssh",
+                    "target": "demo-security-group", "status": "healthy", "source": "synthetic-demo"})}
                 return json.dumps({"jsonrpc": "2.0", "id": "dev", "result": {
                     "isError": False, "content": [{"type": "text", "text": json.dumps(nested)}]}})
             return json.dumps({"jsonrpc": "2.0", "id": "prod", "error": {
@@ -312,8 +345,11 @@ Promise.all([run({{environment:'dev'}}), run({{environment:'prod',ticket:''}}), 
             config = kwargs["input"]
             response_line = next(line for line in config.splitlines() if line.startswith("output = "))
             response_path = Path(response_line.split('"', 2)[1])
-            environment = "prod" if '"id":"prod"' in Path(next(
-                line for line in config.splitlines() if line.startswith("data-binary = ")).split('"', 2)[1][1:]).read_text() else "dev"
+            request_path = Path(next(
+                line for line in config.splitlines() if line.startswith("data-binary = ")).split('"', 2)[1][1:])
+            request = json.loads(request_path.read_text())
+            requests.append(request)
+            environment = request["id"]
             response_path.write_text(gateway_envelope(environment), encoding="utf-8")
             return subprocess.CompletedProcess(command, 0, "200", "")
 
@@ -324,6 +360,12 @@ Promise.all([run({{environment:'dev'}}), run({{environment:'prod',ticket:''}}), 
         with tempfile.TemporaryDirectory() as temp, mock.patch.dict(os.environ, settings, clear=False):
             self.assertEqual(server.verify_gateway("dev", runner=runner), "ALLOW")
             self.assertEqual(server.verify_gateway("prod", runner=runner), "DENY")
+        self.assertEqual(requests[0]["params"]["arguments"], {
+            "environment": "dev", "action": "remove_unrestricted_ssh", "target": "demo-security-group",
+        })
+        self.assertEqual(requests[1]["params"]["arguments"], {
+            "environment": "prod", "action": "remove_unrestricted_ssh", "target": "demo-security-group",
+        })
         with mock.patch.dict(os.environ, {"GOVERNANCE_GATEWAY_POLICY_ENABLED": ""}, clear=False):
             with self.assertRaises(server.GovernanceBlocked):
                 server.verify_gateway("dev", runner=runner)

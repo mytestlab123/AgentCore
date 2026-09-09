@@ -45,20 +45,27 @@ AWS Config's managed `restricted-ssh` rule uses the same logic: port 22 open fro
 
 ## Operator-only reset
 
-Run this only after a successful demonstration has verified `COMPLIANT`, and
-only with the private ID of the fixed, unattached Issue #46 demo Group. It
-restores the one intentional non-compliant rule; it does not create, attach,
-delete, or modify any other resource.
+Run this only after a successful demonstration has verified `COMPLIANT`.
+`scripts/rearm-demo-security-state.sh` is the one operator command for the
+complete current AWS-backed demo-resource set. Today that set contains one
+named fixed demo Group. The script refuses to continue if it is attached to an
+ENI and restores only the one intentional non-compliant TCP/22 rule. It does
+not create, attach, delete, or modify any other resource. It is not a
+LibreChat or MCP capability.
 
 ```bash
-DEMO_SG_ID='sg-<private-fixed-demo-group-id>'
 AWS_PROFILE=amit AWS_REGION=ap-southeast-1 \
-  aws ec2 authorize-security-group-ingress \
-    --group-id "$DEMO_SG_ID" \
-    --ip-permissions '[{"IpProtocol":"tcp","FromPort":22,"ToPort":22,"IpRanges":[{"CidrIp":"0.0.0.0/0"}]}]' \
-    --no-cli-pager
+  ./scripts/rearm-demo-security-state.sh --check
+
+AWS_PROFILE=amit AWS_REGION=ap-southeast-1 \
+  ./scripts/rearm-demo-security-state.sh --approve-rearm
 ```
 
 The command should return only after the Group is again `NON_COMPLIANT` for
 unrestricted SSH. Re-run the read-only `check_security_finding` tool to show
 the restored state; do not use the reset command from LibreChat.
+
+If a later approved milestone adds another AWS-backed demo resource, extend
+this one script with that exact resource's identity and attachment/scope gates.
+Do not replace it with generic account-wide discovery or a “make all resources
+non-compliant” action.

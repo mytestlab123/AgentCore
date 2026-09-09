@@ -1,15 +1,70 @@
 # AgentCore Test Proof
 
+Last verified: 9 September 2026, 09:41 SGT
+
+## Issue #48 exact remediation tuple — retained Gateway and live-host proof
+
+The M9–M13 live proof left the dedicated demo Security Group **COMPLIANT** and
+proved the truthful no-op branch. After that proof, Amit explicitly re-armed
+the detached demo Group through the documented operator-only AWS CLI command
+for the next presentation: it now has only TCP/22 from `0.0.0.0/0` and zero ENI
+attachments, so it is intentionally **NON_COMPLIANT**. The deployed MCP never
+performs this reset. If the Group is compliant when an approved request runs,
+it still returns the truthful no-op and does not call the revoke API.
+
+The retained AgentCore Gateway and its two policy bindings are active with one
+server-owned context only:
+
+```text
+environment=dev
+action=remove_unrestricted_ssh
+target=demo-security-group
+```
+
+| Proof | Observed result |
+| --- | --- |
+| Exact retained Gateway tuple | `ALLOW`; bounded backend metric delta `1` |
+| Wrong action | `DENY`; backend metric delta `0` |
+| Wrong target | `DENY`; backend metric delta `0` |
+| Synthetic `prod` environment | `DENY`; backend metric delta `0` |
+| Deployed LibreChat host MCP request | `ALLOW`; provider state `COMPLIANT`; `NO_REMEDIATION_REQUIRED` |
+| Host controlled-action readback | exact AWS revoke `no`; AWS mutation `none` |
+| Deployment health after exact process-tree restart | HTTP `200`; one current Node backend and one current governed MCP child |
+| Current next-demo state | intentionally `NON_COMPLIANT`; only TCP/22 from `0.0.0.0/0`; ENI attachments `0` |
+
+The direct Gateway proof calls the retained Gateway with only the four fixed
+test tuples. Its bounded backend metric establishes one execution for the
+allowed tuple and no execution for every denied tuple. The live host proof
+starts the deployed MCP server with the EC2 instance role and a temporary,
+private state directory. It is a backend/MCP proof, not an authenticated
+LibreChat-browser click proof.
+
+The first host restart had stopped only a detached `npm` wrapper and left the
+old Node/MCP children serving requests. A later exact process-tree restart
+replaced both children and repeated the passing host-MCP proof. HTTP health
+alone is therefore not treated as evidence of a configuration reload.
+
+The visible native approval card still requires Amit's authenticated browser.
+For the current compliant state, **Approve** + **Submit** must show:
+
+```text
+ASK / APPROVE / ALLOW - NO_REMEDIATION_REQUIRED
+Gateway decision: ALLOW
+Provider verification: COMPLIANT
+Exact AWS revoke called: no
+AWS or infrastructure mutation: none
+```
+
+Native **Reject** must leave the request cancelled before MCP invocation.
+
+## Issue #46 real Security Group SSH signal — historical lifecycle proof
+
 Last verified: 8 September 2026, 22:24 SGT
 
-## Issue #46 real Security Group SSH signal — live host proof
-
-Last verified: 8 September 2026, 22:24 SGT
-
-The deployed LibreChat MCP source was updated to PR #47 commit `40da67d`.
-The dedicated demo Security Group remains intentionally unattached and is reset
-to its intentional unrestricted TCP/22 ingress state after proof. The host
-instance role has only the required read-only `ec2:DescribeSecurityGroups`
+The deployed LibreChat MCP source was updated to the Issue #46 implementation.
+This is historical lifecycle evidence: its post-proof reset-to-non-compliant
+state is superseded by the Issue #48 current compliant no-op policy above. The
+host instance role has only the required read-only `ec2:DescribeSecurityGroups`
 List permission plus `ec2:RevokeSecurityGroupIngress` restricted to the
 fixed private demo Security Group. The MCP implementation still hard-binds both
 operations to that private Group ID and the exact TCP/22-from-`0.0.0.0/0`

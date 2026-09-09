@@ -55,6 +55,8 @@ class Issue40ConfigureLibreChatTests(unittest.TestCase):
                 gateway_url=GATEWAY_URL, security_group_id=SECURITY_GROUP_ID)
             updated = config.read_text(encoding="utf-8")
             self.assertIn(configure.APPROVAL_REASON, updated)
+            self.assertIn("action=remove_unrestricted_ssh", updated)
+            self.assertIn("target=demo-security-group", updated)
             self.assertNotIn("harmless local marker", updated)
             self.assertIn("- apply_demo_remediation_mcp_agentcore_governance", updated)
 

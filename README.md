@@ -110,6 +110,36 @@ proves the three views, masked key, real HTTP 200 response, real IAM HTTP 403
 denial, audit state, local-only browser networking, and exact browser cleanup.
 Evidence is written under `~/.AGENTS-temp/AgentCore/browser-e2e/`.
 
+### Restart the local demo services after a reboot
+
+Use one lifecycle command for the complete local loopback demo set. It starts
+the portal, its API, and the model-free Gateway visual verifier; it does not
+start or control the separately deployed LibreChat EC2 service.
+
+```bash
+AWS_PROFILE=amit AWS_REGION=ap-southeast-1 \
+  ./scripts/local-services.sh --start
+```
+
+The portal/API retains the existing Issue #9 identity and TTL gates, so this
+command stops safely before starting anything when those required environment
+variables are absent. The Gateway visual verifier can be started alone for
+local troubleshooting without a browser action:
+
+```bash
+./scripts/local-services.sh --start-gateway-visual
+./scripts/local-services.sh --status
+./scripts/local-services.sh --stop
+```
+
+Successful `--start` prints these loopback URLs:
+
+```text
+http://localhost:3333/
+http://localhost:9019/
+http://localhost:3334/
+```
+
 ## Minimal AWS architecture
 
 ```text
