@@ -232,6 +232,8 @@ Kiro / Codex
   -> broad AWS MCP for development/research
 ```
 
+The AWS announcement currently lists the managed AWS MCP Server in US East (N. Virginia) and Europe (Frankfurt). That regional footprint is another reason to treat it as builder tooling rather than a Singapore production-runtime dependency.
+
 It should **not** become the production remediation boundary:
 
 ```text
@@ -413,7 +415,7 @@ The deep-research findings were reviewed against current official AWS documentat
 1. **No Singapore Registry date:** design for portability, not an assumed roadmap date.
 2. **Management account:** administrative access is useful for bootstrap, but workload deployment there is contrary to AWS Organizations best practice.
 3. **Security Agent/Continuum:** complementary to, not a replacement for, Inspector and Security Hub infrastructure findings.
-4. **Agent Toolkit:** excellent builder accelerator; broad AWS MCP is not the product's write boundary.
+4. **Agent Toolkit:** excellent builder accelerator; broad AWS MCP is not the product's write boundary, and the managed MCP Server currently has a smaller Region footprint than AgentCore Singapore.
 5. **Temporal approval:** current LibreChat/native approval does not automatically become Policy history.
 6. **Registry auto-detection:** organization-wide does not mean cross-Region; it is Region-scoped.
 7. **Real identifiers:** the future private demo may display real provider identifiers, but credentials, tokens, private keys, and secrets remain prohibited.
@@ -440,7 +442,7 @@ Registry:
 
 Organizations / security services:
 
-- https://docs.aws.amazon.com/organizations/latest/userguide/orgs-best-practices_mgmt-acct.html
+- https://docs.aws.amazon.com/organizations/latest/userguide/orgs_best-practices_mgmt-acct.html
 - https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/stacksets-orgs-associate-stackset-with-org.html
 - https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/stacksets-orgs-manage-auto-deployment.html
 - https://docs.aws.amazon.com/securityhub/latest/userguide/central-configuration-intro.html
