@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -15,18 +16,20 @@ import gateway_policy_poc as poc
 SCRIPT = Path(__file__).with_name("gateway_policy_poc.py")
 
 
-def dev_response(environment="dev", status="healthy", source="synthetic-demo"):
-    payload = {"environment": environment, "status": status, "source": source}
+def allow_response(case_name="exact-allow", status="healthy", source="synthetic-demo"):
+    context = poc.case_context(case_name)
+    payload = {"environment": context["environment"], "action": context["action"],
+               "target": context["target"], "status": status, "source": source}
     lambda_result = {"statusCode": 200, "body": json.dumps(payload)}
-    return json.dumps({"jsonrpc": "2.0", "id": "dev", "result": {
+    return json.dumps({"jsonrpc": "2.0", "id": case_name, "result": {
         "isError": False, "content": [{"type": "text", "text": json.dumps(lambda_result)}]}})
 
 
-def prod_response(code=-32002, message=None):
+def deny_response(case_name="synthetic-prod", code=-32002, message=None):
     message = message or (
         "Tool Execution Denied: Tool call not allowed due to policy enforcement "
         "[No policy applies to the request (denied by default).]")
-    return json.dumps({"jsonrpc": "2.0", "id": "prod",
+    return json.dumps({"jsonrpc": "2.0", "id": case_name,
                        "error": {"code": code, "message": message}})
 
 
@@ -86,42 +89,86 @@ class GatewayPolicyPocTest(unittest.TestCase):
         self.assertEqual(env["AWS_REGION"], poc.REGION)
         self.assertEqual(env["KEEP_ME"], "yes")
 
-    def test_exact_allow_and_deny_responses_pass(self):
-        poc.validate_results(200, dev_response(), 1, 200, prod_response(), 0)
+    def test_exact_tuple_allow_and_all_bounded_denials_pass(self):
+        poc.parse_allow_response(200, allow_response(), "exact-allow")
+        for case_name in ("wrong-action", "wrong-target", "synthetic-prod"):
+            with self.subTest(case_name=case_name):
+                poc.parse_deny_response(200, deny_response(case_name), case_name)
 
     def test_false_positive_responses_are_rejected(self):
         bad_cases = (
             (200, "synthetic-demo healthy", 200, "Authorization denied"),
-            (200, json.dumps({"jsonrpc": "2.0", "id": "dev", "error": {
-                "code": -32603, "message": "synthetic-demo healthy"}}), 200, prod_response()),
-            (200, dev_response(), 401, json.dumps({"message": "Authorization token expired"})),
-            (200, dev_response(), 200, json.dumps({"jsonrpc": "2.0", "id": "prod",
+            (200, json.dumps({"jsonrpc": "2.0", "id": "exact-allow", "error": {
+                "code": -32603, "message": "synthetic-demo healthy"}}), 200, deny_response()),
+            (200, allow_response(), 401, json.dumps({"message": "Authorization token expired"})),
+            (200, allow_response(), 200, json.dumps({"jsonrpc": "2.0", "id": "synthetic-prod",
                 "result": {"isError": False, "content": [{"type": "text", "text": "denied"}]}})),
-            (200, dev_response(environment="prod"), 200, prod_response()),
-            (200, dev_response(), 200, prod_response(code=-32001)),
+            (200, allow_response(status="unhealthy"), 200, deny_response()),
+            (200, allow_response(), 200, deny_response(code=-32001)),
         )
         for dev_code, dev_body, prod_code, prod_body in bad_cases:
             with self.subTest(prod_code=prod_code), self.assertRaises(poc.Blocked):
-                poc.validate_results(dev_code, dev_body, 1, prod_code, prod_body, 0)
+                poc.parse_allow_response(dev_code, dev_body, "exact-allow")
+                poc.parse_deny_response(prod_code, prod_body, "synthetic-prod")
         with self.assertRaises(poc.Blocked):
-            poc.validate_results(200, dev_response(), 1, 200, prod_response(), 1)
+            poc.parse_deny_response(200, deny_response("exact-allow"), "exact-allow")
 
     def test_case_cost_and_endpoint_contracts(self):
-        poc.validate_case(poc.TOOL_NAME, "dev")
+        poc.validate_case(poc.TOOL_NAME, "exact-allow")
+        self.assertEqual(poc.case_context("exact-allow"), {
+            "environment": "dev", "action": "remove_unrestricted_ssh",
+            "target": "demo-security-group", "decision": "ALLOW",
+        })
+        for case_name in ("wrong-action", "wrong-target", "synthetic-prod"):
+            self.assertEqual(poc.case_context(case_name)["decision"], "DENY")
         self.assertEqual(poc.validate_cost("1.01"), 1.01)
         good_url = "https://example.gateway.bedrock-agentcore.ap-southeast-1.amazonaws.com"
         self.assertEqual(poc.validate_gateway_url(good_url), good_url)
         for value in ("bad", -1, 2, float("inf")):
             with self.subTest(value=value), self.assertRaises(poc.Blocked):
                 poc.validate_cost(value)
-        for tool, environment in (("other", "dev"), (poc.TOOL_NAME, "stage")):
+        for tool, case_name in (("other", "exact-allow"), (poc.TOOL_NAME, "stage")):
             with self.assertRaises(poc.Blocked):
-                poc.validate_case(tool, environment)
+                poc.validate_case(tool, case_name)
         for url in ("http://example.gateway.bedrock-agentcore.ap-southeast-1.amazonaws.com",
                     "https://example.invalid/mcp",
                     "https://user:pass@example.gateway.bedrock-agentcore.ap-southeast-1.amazonaws.com"):
             with self.assertRaises(poc.Blocked):
                 poc.validate_gateway_url(url)
+
+    def test_exact_cedar_schema_and_lambda_context_are_bound(self):
+        statement = poc.cedar_statement(
+            "arn:aws:sts::111122223333:assumed-role/Demo/session",
+            "arn:aws:bedrock-agentcore:ap-southeast-1:111122223333:gateway/demo",
+        )
+        for fragment in (
+            'context.input.environment == "dev"',
+            'context.input.action == "remove_unrestricted_ssh"',
+            'context.input.target == "demo-security-group"',
+        ):
+            self.assertIn(fragment, statement)
+        schema = json.loads(poc.TOOL_SCHEMA.read_text())
+        self.assertEqual(schema[0]["inputSchema"]["required"], ["environment", "action", "target"])
+        for definition in schema[0]["inputSchema"]["properties"].values():
+            self.assertEqual(set(definition), {"type", "description"})
+        self.assertIn("action = event.get('action')", poc.lambda_source())
+        self.assertIn("target = event.get('target')", poc.lambda_source())
+
+    def test_each_fixed_deny_case_has_zero_backend_delta(self):
+        gateway = {"gatewayUrl": "https://demo.gateway.bedrock-agentcore.ap-southeast-1.amazonaws.com"}
+        for case_name in ("wrong-action", "wrong-target", "synthetic-prod"):
+            with self.subTest(case_name=case_name):
+                with tempfile.TemporaryDirectory() as directory:
+                    aws = mock.Mock()
+                    aws.private_dir = Path(directory)
+                    with mock.patch.object(poc, "PRIVATE_ROOT", Path(directory)), \
+                            mock.patch.object(poc, "quiet_metric_boundary", return_value=datetime.now(timezone.utc)), \
+                            mock.patch.object(poc, "invoke_gateway", return_value=(200, deny_response(case_name))), \
+                            mock.patch.object(poc, "wait_for_metric", return_value=0) as metric_wait:
+                        evidence = poc.prove_fixed_action(
+                            aws, gateway, case_name, deny_observation_seconds=0)
+                self.assertEqual(evidence["backend_delta"], 0)
+                metric_wait.assert_called_once()
 
     def test_metric_wait_rejects_extra_invocation(self):
         with mock.patch.object(poc, "metric_sum", return_value=2):
@@ -214,6 +261,83 @@ class GatewayPolicyPocTest(unittest.TestCase):
             with self.assertRaises(poc.Blocked):
                 poc.native_resources(Path(directory), complete=True)
 
+    def test_retained_target_schema_converges_only_the_known_lambda_target(self):
+        lambda_arn = "arn:aws:lambda:ap-southeast-1:111122223333:function:demo"
+        schema_uri = "s3://bucket/" + "a" * 64 + ".json"
+        gateway_state = {"gatewayId": "gateway", "targets": {poc.TARGET_NAME: {"targetId": "target"}}}
+        expected = poc.expected_lambda_target_configuration(lambda_arn, schema_uri)
+        retained_fields = {
+            "name": poc.TARGET_NAME,
+            "description": f"Lambda function target: {poc.TARGET_NAME}",
+            "credentialProviderConfigurations": poc.expected_gateway_target_credentials(),
+            "metadataConfiguration": poc.expected_gateway_target_metadata(),
+        }
+        ready = {"status": "READY", **retained_fields, "targetConfiguration": expected}
+        aws = mock.Mock()
+        with mock.patch.object(poc, "wait_gateway_target_ready", return_value=ready):
+            self.assertFalse(poc.converge_gateway_tool_schema(aws, gateway_state, lambda_arn, schema_uri))
+        aws.call.assert_not_called()
+
+        old = {"status": "READY", **retained_fields, "targetConfiguration": {
+            "mcp": {"lambda": {"lambdaArn": lambda_arn, "toolSchema": {"inlinePayload": []}}}}}
+        aws = mock.Mock()
+        with mock.patch.object(poc, "wait_gateway_target_ready", side_effect=[old, ready]):
+            self.assertTrue(poc.converge_gateway_tool_schema(aws, gateway_state, lambda_arn, schema_uri))
+        self.assertEqual(aws.call.call_args.args[:2], ("bedrock-agentcore-control", "update-gateway-target"))
+        self.assertEqual(aws.call.call_args.args[2]["name"], poc.TARGET_NAME)
+        self.assertEqual(aws.call.call_args.args[2]["credentialProviderConfigurations"],
+                         poc.expected_gateway_target_credentials())
+        self.assertNotIn("metadataConfiguration", aws.call.call_args.args[2])
+        self.assertEqual(aws.call.call_args.args[2]["targetConfiguration"], expected)
+
+        drifted = {"status": "READY", "targetConfiguration": {
+            "mcp": {"lambda": {"lambdaArn": lambda_arn + "-other", "toolSchema": {"inlinePayload": []}}}}}
+        with mock.patch.object(poc, "wait_gateway_target_ready", return_value=drifted), self.assertRaises(poc.Blocked):
+            poc.converge_gateway_tool_schema(mock.Mock(), gateway_state, lambda_arn, schema_uri)
+
+    def test_native_schema_uri_must_reference_the_rendered_reviewed_asset(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            output = project / "cdk" / "cdk.out"
+            output.mkdir(parents=True)
+            digest = "b" * 64
+            uri = f"s3://bucket/{digest}.json"
+            template = {"Resources": {"Target": {
+                "Type": "AWS::BedrockAgentCore::GatewayTarget",
+                "Properties": {"TargetConfiguration": {"Mcp": {"Lambda": {
+                    "ToolSchema": {"S3": {"Uri": uri}}}}}},
+            }}}
+            (output / f"{poc.STACK_NAME}.template.json").write_text(json.dumps(template))
+            (output / f"asset.{digest}.json").write_text(poc.TOOL_SCHEMA.read_text())
+            self.assertEqual(poc.rendered_tool_schema_uri(project), uri)
+            (output / f"asset.{digest}.json").write_text("[]")
+            with self.assertRaises(poc.Blocked):
+                poc.rendered_tool_schema_uri(project)
+
+    def test_schema_asset_staging_is_exact_and_idempotent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            output = project / "cdk" / "cdk.out"
+            output.mkdir(parents=True)
+            digest = "c" * 64
+            uri = f"s3://bucket/{digest}.json"
+            asset = output / f"asset.{digest}.json"
+            asset.write_text("[]")
+            aws = mock.Mock()
+            aws.env = {}
+            aws.call.return_value = {"ContentLength": asset.stat().st_size}
+            self.assertFalse(poc.ensure_rendered_tool_schema_asset(aws, project, uri))
+            aws.call.assert_called_once_with("s3api", "head-object", {"Bucket": "bucket", "Key": f"{digest}.json"})
+
+            aws = mock.Mock()
+            aws.env = {}
+            aws.call.side_effect = [poc.Blocked("NoSuchKey"), {"ContentLength": asset.stat().st_size}]
+            runner = mock.Mock(return_value=subprocess.CompletedProcess([], 0, "", ""))
+            self.assertTrue(poc.ensure_rendered_tool_schema_asset(aws, project, uri, runner=runner))
+            self.assertEqual(runner.call_args.args[0][0:3], ["aws", "s3", "cp"])
+            self.assertEqual(runner.call_args.args[0][3], str(asset))
+            self.assertEqual(runner.call_args.args[0][4], uri)
+
     def test_sanitization_covers_real_credential_field_names(self):
         raw = ('123456789012 arn:aws:iam::123456789012:role/x '
                'https://example.invalid/mcp "AccessKeyId":"AKIAEXAMPLE", '
@@ -239,12 +363,14 @@ class GatewayPolicyPocTest(unittest.TestCase):
             gateway = {"gatewayUrl": "https://demo.gateway.bedrock-agentcore.ap-southeast-1.amazonaws.com"}
             with mock.patch.object(poc, "PRIVATE_ROOT", Path(directory)), \
                     mock.patch.object(poc, "retained_live_context", return_value=(aws, gateway, 1.01)), \
-                    mock.patch.object(poc, "invoke_gateway", return_value=(200, dev_response())), \
-                    mock.patch.object(poc, "parse_dev_response") as parse_dev, \
+                    mock.patch.object(poc, "invoke_gateway", return_value=(200, allow_response())), \
+                    mock.patch.object(poc, "parse_allow_response") as parse_allow, \
                     mock.patch.object(poc, "wait_for_metric") as metric_wait:
-                result = poc.verify_retained_action("dev")
-        self.assertEqual(result, {"environment": "dev", "decision": "ALLOW", "retained_cost_gate": "PASS"})
-        parse_dev.assert_called_once()
+                result = poc.verify_retained_action("exact-allow")
+        self.assertEqual(result, {"case": "exact-allow", "context": {
+            "environment": "dev", "action": "remove_unrestricted_ssh", "target": "demo-security-group"},
+            "decision": "ALLOW", "retained_cost_gate": "PASS"})
+        parse_allow.assert_called_once()
         metric_wait.assert_not_called()
 
 

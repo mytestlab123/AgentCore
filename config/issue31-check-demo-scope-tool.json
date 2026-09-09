@@ -1,17 +1,24 @@
 [
   {
     "name": "check_demo_scope",
-    "description": "Return one fixed synthetic health result for dev or prod",
+    "description": "Return one fixed bounded Gateway policy result for the approved remediation tuple",
     "inputSchema": {
       "type": "object",
       "properties": {
         "environment": {
           "type": "string",
-          "description": "Exact demo environment: dev or prod",
-          "enum": ["dev", "prod"]
+          "description": "Bounded policy environment; Cedar permits only the exact dev tuple"
+        },
+        "action": {
+          "type": "string",
+          "description": "Bounded policy action used only by retained Gateway proof cases"
+        },
+        "target": {
+          "type": "string",
+          "description": "Bounded policy target used only by retained Gateway proof cases"
         }
       },
-      "required": ["environment"]
+      "required": ["environment", "action", "target"]
     }
   }
 ]

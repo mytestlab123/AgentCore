@@ -21,6 +21,8 @@ REGION = "ap-southeast-1"
 MCP_PROTOCOL_VERSION = "2025-03-26"
 FULL_TOOL_NAME = "Issue31Target___check_demo_scope"
 URL_SUFFIX = f".gateway.bedrock-agentcore.{REGION}.amazonaws.com"
+REMEDIATION_ACTION = "remove_unrestricted_ssh"
+DEMO_TARGET = "demo-security-group"
 
 
 class GatewayRuntimeBlocked(RuntimeError):
@@ -46,6 +48,17 @@ def private_write(path: Path, value: str) -> None:
     path.chmod(0o600)
 
 
+def policy_context(environment: str) -> dict[str, str]:
+    """Return the sole server-owned context allowed from the MCP runtime."""
+    if environment not in {"dev", "prod"}:
+        raise GatewayRuntimeBlocked("unexpected Gateway environment")
+    return {
+        "environment": environment,
+        "action": REMEDIATION_ACTION,
+        "target": DEMO_TARGET,
+    }
+
+
 def parse_decision(environment: str, http_code: int, body: str) -> str:
     try:
         envelope = json.loads(body)
@@ -61,7 +74,11 @@ def parse_decision(environment: str, http_code: int, body: str) -> str:
                 result = json.loads(payload.get("body", ""))
             except (AttributeError, TypeError, json.JSONDecodeError) as exc:
                 raise GatewayRuntimeBlocked("Gateway dev result was malformed") from exc
-            if result == {"environment": "dev", "status": "healthy", "source": "synthetic-demo"}:
+            if result == {
+                **policy_context("dev"),
+                "status": "healthy",
+                "source": "synthetic-demo",
+            }:
                 return "ALLOW"
         raise GatewayRuntimeBlocked("Gateway did not return the required dev ALLOW result")
     error = envelope.get("error")
@@ -78,8 +95,7 @@ def verify_gateway(
     private_dir: Path,
     runner: Any = subprocess.run,
 ) -> str:
-    if environment not in {"dev", "prod"}:
-        raise GatewayRuntimeBlocked("unexpected Gateway environment")
+    context = policy_context(environment)
     endpoint = require_gateway_url()
     exported = runner(
         ["aws", "--region", REGION, "configure", "export-credentials"],
@@ -101,7 +117,7 @@ def verify_gateway(
     response = Path(private_dir) / f"gateway-runtime-{environment}-response.json"
     private_write(request, json.dumps({
         "jsonrpc": "2.0", "id": environment, "method": "tools/call",
-        "params": {"name": FULL_TOOL_NAME, "arguments": {"environment": environment}},
+        "params": {"name": FULL_TOOL_NAME, "arguments": context},
     }, separators=(",", ":")))
     private_write(response, "")
     config = [

@@ -7,6 +7,11 @@ dedicated demo Security Group with `ec2:DescribeSecurityGroups`, evaluates only
 unrestricted TCP/22 ingress, uses the retained Gateway verifier, and can revoke
 only the exact TCP/22-from-0.0.0.0/0 rule from that Group after approval. It
 never accepts a caller-selected AWS resource or generic AWS command.
+It sends only the fixed server-owned Gateway tuple
+`environment=dev`, `action=remove_unrestricted_ssh`, and
+`target=demo-security-group`; `dev` alone is insufficient. If the fixed Group
+is already `COMPLIANT`, an approved request is `NO_REMEDIATION_REQUIRED`: it
+does not call the revoke API or recreate the rule.
 
 ## Configure
 
@@ -45,8 +50,8 @@ do not fall through on older saved agents.
    execution, not a failed remediation. If the model receives control after
    the rejection, its final text should begin `ASK / REJECT`.
 3. Repeat and select **Approve**. The MCP server asks the already-retained
-   AgentCore Gateway for the `dev` decision with the host instance role. Only
-   **ALLOW** can revoke only the exact TCP/22 rule from `0.0.0.0/0`, then
+   AgentCore Gateway for the complete fixed tuple with the host instance role.
+   Only **ALLOW** can revoke only the exact TCP/22 rule from `0.0.0.0/0`, then
    immediately re-reads the same fixed Group and reports **COMPLIANT**
    (**ASK / Approve / ALLOW**). The response reports one tool call, the exact
    dedicated-rule mutation, verification, and no secret access. If the

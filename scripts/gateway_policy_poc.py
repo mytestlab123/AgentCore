@@ -41,6 +41,26 @@ GATEWAY_NAME = "Issue31Gateway"
 TARGET_NAME = "Issue31Target"
 ENGINE_NAME = "Issue31PolicyEngine"
 POLICY_NAME = "Issue31DevPermit"
+REMEDIATION_ACTION = "remove_unrestricted_ssh"
+DEMO_TARGET = "demo-security-group"
+GATEWAY_CASES = {
+    "exact-allow": {
+        "environment": "dev", "action": REMEDIATION_ACTION,
+        "target": DEMO_TARGET, "decision": "ALLOW",
+    },
+    "wrong-action": {
+        "environment": "dev", "action": "delete_security_group",
+        "target": DEMO_TARGET, "decision": "DENY",
+    },
+    "wrong-target": {
+        "environment": "dev", "action": REMEDIATION_ACTION,
+        "target": "other-target", "decision": "DENY",
+    },
+    "synthetic-prod": {
+        "environment": "prod", "action": REMEDIATION_ACTION,
+        "target": DEMO_TARGET, "decision": "DENY",
+    },
+}
 EXPECTED_APP_COUNTS = Counter({
     "AWS::BedrockAgentCore::Gateway": 1,
     "AWS::BedrockAgentCore::GatewayTarget": 1,
@@ -197,53 +217,85 @@ def cedar_statement(caller_arn, gateway_arn):
     return (f'permit(principal == AgentCore::IamEntity::"{caller}", '
             f'action == AgentCore::Action::"{FULL_TOOL_NAME}", '
             f'resource == AgentCore::Gateway::"{gateway_arn}") '
+            'when { context.input.environment == "dev" && '
+            'context.input.action == "remove_unrestricted_ssh" && '
+            'context.input.target == "demo-security-group" };')
+
+
+def legacy_cedar_statement(caller_arn, gateway_arn):
+    """The prior environment-only statement, accepted only for controlled migration."""
+    caller = cedar_principal(caller_arn)
+    return (f'permit(principal == AgentCore::IamEntity::"{caller}", '
+            f'action == AgentCore::Action::"{FULL_TOOL_NAME}", '
+            f'resource == AgentCore::Gateway::"{gateway_arn}") '
             'when { context.input.environment == "dev" };')
 
 
-def validate_case(tool_name, environment):
+def case_context(case_name):
+    try:
+        return dict(GATEWAY_CASES[case_name])
+    except KeyError as error:
+        raise Blocked("unexpected bounded Gateway proof case") from error
+
+
+def validate_case(tool_name, case_name):
     if tool_name != TOOL_NAME:
         raise Blocked("unexpected tool name")
-    if environment not in {"dev", "prod"}:
-        raise Blocked("unexpected environment")
+    case_context(case_name)
 
 
-def parse_dev_response(http_code, body):
+def parse_allow_response(http_code, body, case_name="exact-allow"):
+    context = case_context(case_name)
     if http_code != 200:
-        raise Blocked(f"dev Gateway HTTP status was {http_code}")
-    envelope = _json_object(body, "dev Gateway response")
-    if envelope.get("jsonrpc") != "2.0" or envelope.get("id") != "dev" or "error" in envelope:
-        raise Blocked("dev Gateway response envelope is not a successful dev result")
+        raise Blocked(f"Gateway ALLOW HTTP status was {http_code}")
+    envelope = _json_object(body, "Gateway ALLOW response")
+    if envelope.get("jsonrpc") != "2.0" or envelope.get("id") != case_name or "error" in envelope:
+        raise Blocked("Gateway ALLOW response envelope is not a successful fixed result")
     result = envelope.get("result")
     if not isinstance(result, dict) or result.get("isError") is not False:
-        raise Blocked("dev Gateway tool result reported an error")
+        raise Blocked("Gateway ALLOW tool result reported an error")
     content = result.get("content")
     if (not isinstance(content, list) or len(content) != 1
             or not isinstance(content[0], dict) or content[0].get("type") != "text"):
-        raise Blocked("dev Gateway tool content is ambiguous")
-    lambda_result = _json_object(content[0].get("text"), "dev Lambda result")
+        raise Blocked("Gateway ALLOW tool content is ambiguous")
+    lambda_result = _json_object(content[0].get("text"), "Gateway ALLOW Lambda result")
     if lambda_result.get("statusCode") != 200:
-        raise Blocked("dev Lambda status is not 200")
-    payload = _json_object(lambda_result.get("body"), "dev Lambda body")
-    expected = {"environment": "dev", "status": "healthy", "source": "synthetic-demo"}
+        raise Blocked("Gateway ALLOW Lambda status is not 200")
+    payload = _json_object(lambda_result.get("body"), "Gateway ALLOW Lambda body")
+    expected = {**{key: context[key] for key in ("environment", "action", "target")},
+                "status": "healthy", "source": "synthetic-demo"}
     if payload != expected:
-        raise Blocked("dev Lambda payload does not match the fixed synthetic result")
+        raise Blocked("Gateway ALLOW Lambda payload does not match the fixed tuple")
     return payload
 
 
-def parse_prod_response(http_code, body):
+def parse_deny_response(http_code, body, case_name):
+    context = case_context(case_name)
+    if context["decision"] != "DENY":
+        raise Blocked("Gateway denial parser was asked to validate an ALLOW case")
     if http_code != 200:
-        raise Blocked(f"prod Gateway HTTP status was {http_code}; policy denial was not proven")
-    envelope = _json_object(body, "prod Gateway response")
-    if envelope.get("jsonrpc") != "2.0" or envelope.get("id") != "prod" or "result" in envelope:
-        raise Blocked("prod Gateway response envelope is not a policy error")
+        raise Blocked(f"Gateway DENY HTTP status was {http_code}; policy denial was not proven")
+    envelope = _json_object(body, "Gateway DENY response")
+    if envelope.get("jsonrpc") != "2.0" or envelope.get("id") != case_name or "result" in envelope:
+        raise Blocked("Gateway DENY response envelope is not a policy error")
     error = envelope.get("error")
     if not isinstance(error, dict) or error.get("code") != -32002:
-        raise Blocked("prod Gateway response is not the expected policy denial code")
+        raise Blocked("Gateway DENY response is not the expected policy denial code")
     message = str(error.get("message", "")).lower()
     required = ("tool execution denied", "policy enforcement", "denied by default")
     if not all(fragment in message for fragment in required):
-        raise Blocked("prod Gateway response is not an unambiguous deny-by-default decision")
+        raise Blocked("Gateway DENY response is not an unambiguous deny-by-default decision")
     return error
+
+
+def parse_dev_response(http_code, body):
+    """Compatibility name for the sole bounded ALLOW case."""
+    return parse_allow_response(http_code, body)
+
+
+def parse_prod_response(http_code, body):
+    """Compatibility name for the synthetic-prod bounded DENY case."""
+    return parse_deny_response(http_code, body, "synthetic-prod")
 
 
 def validate_results(dev_code, dev_body, dev_delta, prod_code, prod_body, prod_delta):
@@ -335,9 +387,11 @@ def lambda_source():
         "    if not name.endswith('___check_demo_scope'):\n"
         "        return {'statusCode': 400, 'body': json.dumps({'error': 'unknown tool'})}\n"
         "    environment = event.get('environment')\n"
-        "    if environment not in ('dev', 'prod'):\n"
-        "        return {'statusCode': 400, 'body': json.dumps({'error': 'unknown environment'})}\n"
-        "    return {'statusCode': 200, 'body': json.dumps({'environment': environment, 'status': 'healthy', 'source': 'synthetic-demo'})}\n"
+        "    action = event.get('action')\n"
+        "    target = event.get('target')\n"
+        "    if environment not in ('dev', 'prod') or action not in ('remove_unrestricted_ssh', 'delete_security_group') or target not in ('demo-security-group', 'other-target'):\n"
+        "        return {'statusCode': 400, 'body': json.dumps({'error': 'unexpected bounded context'})}\n"
+        "    return {'statusCode': 200, 'body': json.dumps({'environment': environment, 'action': action, 'target': target, 'status': 'healthy', 'source': 'synthetic-demo'})}\n"
     )
 
 
@@ -562,14 +616,155 @@ def native_resources(project, complete=True):
     return state, resources, gateway
 
 
-def converge_native(private_dir, lambda_arn, identity):
+def rendered_tool_schema_uri(project):
+    """Read the native CLI's one generated GatewayTarget schema asset URI."""
+    template = read_json(Path(project) / "cdk" / "cdk.out" /
+                         f"{STACK_NAME}.template.json", "native Gateway target template")
+    matches = [resource.get("Properties", {}).get("TargetConfiguration", {})
+               for resource in template.get("Resources", {}).values()
+               if resource.get("Type") == "AWS::BedrockAgentCore::GatewayTarget"]
+    if len(matches) != 1:
+        raise Blocked("native Gateway target template is ambiguous")
+    try:
+        uri = matches[0]["Mcp"]["Lambda"]["ToolSchema"]["S3"]["Uri"]
+    except (KeyError, TypeError) as error:
+        raise Blocked("native Gateway target template has no S3 tool schema") from error
+    if not isinstance(uri, str) or not re.fullmatch(r"s3://[^/]+/[0-9a-f]{64}\.json", uri):
+        raise Blocked("native Gateway target tool schema URI is invalid")
+    asset = rendered_tool_schema_asset_path(project, uri)
+    if canonical(read_json(asset, "native Gateway tool schema asset")) != canonical(
+            read_json(TOOL_SCHEMA, "reviewed Gateway tool schema")):
+        raise Blocked("native Gateway tool schema asset differs from the reviewed schema")
+    return uri
+
+
+def rendered_tool_schema_asset_path(project, schema_uri):
+    match = re.fullmatch(r"s3://([^/]+)/([0-9a-f]{64}\.json)", schema_uri)
+    if not match:
+        raise Blocked("native Gateway tool schema URI is invalid")
+    return Path(project) / "cdk" / "cdk.out" / f"asset.{match.group(2)}"
+
+
+def ensure_rendered_tool_schema_asset(aws, project, schema_uri, *, runner=subprocess.run):
+    """Stage only the native CLI's content-addressed schema asset if absent."""
+    match = re.fullmatch(r"s3://([^/]+)/([0-9a-f]{64}\.json)", schema_uri)
+    if not match:
+        raise Blocked("native Gateway tool schema URI is invalid")
+    bucket, key = match.groups()
+    asset = rendered_tool_schema_asset_path(project, schema_uri)
+    size = asset.stat().st_size
+    try:
+        head = aws.call("s3api", "head-object", {"Bucket": bucket, "Key": key})
+        present = True
+    except Blocked as error:
+        if not any(marker in str(error) for marker in ("NoSuchKey", "Not Found", "404")):
+            raise
+        head = {}
+        present = False
+    if present and head.get("ContentLength") == size:
+        return False
+    if present:
+        raise Blocked("existing native Gateway schema asset has an unexpected length")
+    uploaded = runner(
+        ["aws", "s3", "cp", str(asset), schema_uri, "--no-progress", "--only-show-errors"],
+        env=aws.env, check=False, capture_output=True, text=True, timeout=60,
+    )
+    if uploaded.returncode != 0:
+        raise Blocked(f"native Gateway schema asset upload failed: {sanitize(uploaded.stderr.strip())}")
+    head = aws.call("s3api", "head-object", {"Bucket": bucket, "Key": key})
+    if head.get("ContentLength") != size:
+        raise Blocked("native Gateway schema asset upload could not be verified")
+    return True
+
+
+def expected_lambda_target_configuration(lambda_arn, schema_uri):
+    return {
+        "mcp": {
+            "lambda": {
+                "lambdaArn": lambda_arn,
+                "toolSchema": {"s3": {"uri": schema_uri}},
+            },
+        },
+    }
+
+
+def expected_gateway_target_metadata():
+    return {"allowedRequestHeaders": ["x-amzn-bedrock-agentcore-policy-session-id"]}
+
+
+def expected_gateway_target_credentials():
+    return [{"credentialProviderType": "GATEWAY_IAM_ROLE"}]
+
+
+def wait_gateway_target_ready(aws, gateway_id, target_id, timeout=120):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        target = aws.call("bedrock-agentcore-control", "get-gateway-target", {
+            "gatewayIdentifier": gateway_id, "targetId": target_id})
+        status = target.get("status")
+        if status == "READY":
+            return target
+        if status in {"CREATE_FAILED", "UPDATE_FAILED", "DELETE_FAILED"}:
+            raise Blocked("retained Gateway target did not become READY")
+        time.sleep(5)
+    raise Blocked("timed out waiting for retained Gateway target")
+
+
+def converge_gateway_tool_schema(aws, gateway_state, lambda_arn, schema_uri):
+    """Update only the known retained target's inline schema before Cedar migration."""
+    gateway_id = gateway_state.get("gatewayId")
+    target = gateway_state.get("targets", {}).get(TARGET_NAME, {})
+    target_id = target.get("targetId")
+    if not gateway_id or not target_id:
+        raise Blocked("retained Gateway target identity is incomplete")
+    current = wait_gateway_target_ready(aws, gateway_id, target_id)
+    expected = expected_lambda_target_configuration(lambda_arn, schema_uri)
+    actual = current.get("targetConfiguration")
+    if current.get("name") not in {None, TARGET_NAME}:
+        raise Blocked("retained Gateway target name differs from the approved target")
+    if current.get("description") not in {None, f"Lambda function target: {TARGET_NAME}"}:
+        raise Blocked("retained Gateway target description differs from the approved target")
+    if canonical(current.get("credentialProviderConfigurations")) != canonical(
+            expected_gateway_target_credentials()):
+        raise Blocked("retained Gateway target credential provider differs from the approved target")
+    if canonical(current.get("metadataConfiguration")) != canonical(expected_gateway_target_metadata()):
+        raise Blocked("retained Gateway target metadata differs from the approved target")
+    if canonical(actual) == canonical(expected):
+        return False
+    current_lambda = (actual or {}).get("mcp", {}).get("lambda", {}).get("lambdaArn")
+    if current_lambda != lambda_arn:
+        raise Blocked("retained Gateway target Lambda linkage differs from the approved target")
+    aws.call("bedrock-agentcore-control", "update-gateway-target", {
+        "gatewayIdentifier": gateway_id,
+        "targetId": target_id,
+        "name": TARGET_NAME,
+        "description": f"Lambda function target: {TARGET_NAME}",
+        "targetConfiguration": expected,
+        "credentialProviderConfigurations": expected_gateway_target_credentials(),
+        # AgentCore returns this system-managed header in reads but rejects it
+        # in UpdateGatewayTarget.  Validate it above; let the service retain it.
+    })
+    updated = wait_gateway_target_ready(aws, gateway_id, target_id)
+    if canonical(updated.get("targetConfiguration")) != canonical(expected):
+        raise Blocked("retained Gateway target schema did not converge exactly")
+    return True
+
+
+def converge_native(private_dir, aws, lambda_arn, identity):
     project = ensure_private_scaffold(private_dir)
     if not (project / ".cli/deployed-state.json").exists():
         render_private_project(private_dir, lambda_arn, identity, include_policy=False)
         deploy_native_resources(project, phase="phase1")
     _, _, gateway = native_resources(project, complete=False)
+    # Synthesize first so the target uses the exact native CLI/CDK asset that
+    # the following stack update declares.  AgentCore validates Cedar against
+    # the live target schema before CloudFormation can replace that schema.
     render_private_project(private_dir, lambda_arn, identity,
                            gateway_arn=gateway["gatewayArn"], include_policy=True)
+    deploy_native_resources(project, dry_run=True, phase="schema-synth")
+    schema_uri = rendered_tool_schema_uri(project)
+    ensure_rendered_tool_schema_asset(aws, project, schema_uri)
+    converge_gateway_tool_schema(aws, gateway, lambda_arn, schema_uri)
     deploy_native_resources(project, phase="phase2")
     return project
 
@@ -584,8 +779,9 @@ def validate_gateway_url(value):
     return value
 
 
-def invoke_gateway(aws, gateway_url, environment):
-    validate_case(TOOL_NAME, environment)
+def invoke_gateway(aws, gateway_url, case_name):
+    validate_case(TOOL_NAME, case_name)
+    context = case_context(case_name)
     gateway_url = validate_gateway_url(gateway_url)
     exported = subprocess.run(["aws", "--profile", PROFILE, "--region", REGION,
         "configure", "export-credentials"], env=aws.env, text=True,
@@ -595,11 +791,11 @@ def invoke_gateway(aws, gateway_url, environment):
     credentials = _json_object(exported.stdout, "credential provider response")
     if any(not credentials.get(key) for key in ("AccessKeyId", "SecretAccessKey")):
         raise Blocked("credential provider response is incomplete")
-    request = aws.private_dir / f"proof-{environment}-request.json"
-    response = aws.private_dir / f"proof-{environment}-response.txt"
-    write_private_json(request, {"jsonrpc": "2.0", "id": environment,
+    request = aws.private_dir / f"proof-{case_name}-request.json"
+    response = aws.private_dir / f"proof-{case_name}-response.txt"
+    write_private_json(request, {"jsonrpc": "2.0", "id": case_name,
         "method": "tools/call", "params": {"name": FULL_TOOL_NAME,
-        "arguments": {"environment": environment}}})
+        "arguments": {key: context[key] for key in ("environment", "action", "target")}}})
     write_private_text(response, "")
     endpoint = gateway_url.rstrip("/")
     if not endpoint.endswith("/mcp"):
@@ -669,64 +865,69 @@ def quiet_metric_boundary(aws, samples):
 def prove_deltas(aws, gateway):
     samples = []
     start = quiet_metric_boundary(aws, samples)
-    dev_code, dev_body = invoke_gateway(aws, gateway["gatewayUrl"], "dev")
-    parse_dev_response(dev_code, dev_body)
+    dev_code, dev_body = invoke_gateway(aws, gateway["gatewayUrl"], "exact-allow")
+    parse_allow_response(dev_code, dev_body, "exact-allow")
     after_dev = wait_for_metric(aws, start, 1, samples)
-    prod_started = datetime.now(timezone.utc)
-    prod_code, prod_body = invoke_gateway(aws, gateway["gatewayUrl"], "prod")
-    parse_prod_response(prod_code, prod_body)
-    minimum_observation = prod_started + timedelta(seconds=120)
+    denied = {}
+    deny_started = datetime.now(timezone.utc)
+    for case_name in ("wrong-action", "wrong-target", "synthetic-prod"):
+        code, body = invoke_gateway(aws, gateway["gatewayUrl"], case_name)
+        parse_deny_response(code, body, case_name)
+        denied[case_name] = {"http_code": code, "response": json.loads(body)}
+    minimum_observation = deny_started + timedelta(seconds=120)
     if datetime.now(timezone.utc) < minimum_observation:
         time.sleep((minimum_observation - datetime.now(timezone.utc)).total_seconds())
     after_prod = wait_for_metric(aws, start, 1, samples, stable_samples=2)
-    validate_results(dev_code, dev_body, after_dev, prod_code, prod_body,
-                     after_prod - after_dev)
-    evidence = {"proof_started": start.isoformat(), "prod_started": prod_started.isoformat(),
+    if after_prod - after_dev != 0:
+        raise Blocked("Gateway DENY cases invoked the synthetic backend")
+    evidence = {"proof_started": start.isoformat(), "deny_started": deny_started.isoformat(),
         "proof_finished": datetime.now(timezone.utc).isoformat(),
-        "dev_http_code": dev_code, "prod_http_code": prod_code,
-        "dev_backend_delta": after_dev, "prod_backend_delta": after_prod - after_dev,
+        "allow_http_code": dev_code, "allow_backend_delta": after_dev,
+        "deny_backend_delta": after_prod - after_dev, "denied_cases": denied,
         "metric_samples": samples, "dev_response": json.loads(dev_body),
-        "prod_response": json.loads(prod_body)}
+    }
     write_private_json(aws.private_dir / "proof-evidence.json", evidence)
     return evidence
 
 
-def prove_fixed_action(aws, gateway, environment):
+def prove_fixed_action(aws, gateway, case_name, *, deny_observation_seconds=120):
     """Invoke one fixed Gateway case and verify its bounded Lambda delta.
 
     This is deliberately read/invoke-only: it never creates, repairs, deploys,
     updates, or deletes any retained resource.
     """
-    validate_case(TOOL_NAME, environment)
+    validate_case(TOOL_NAME, case_name)
+    context = case_context(case_name)
     samples = []
     start = quiet_metric_boundary(aws, samples)
-    code, body = invoke_gateway(aws, gateway["gatewayUrl"], environment)
-    if environment == "dev":
-        parse_dev_response(code, body)
+    code, body = invoke_gateway(aws, gateway["gatewayUrl"], case_name)
+    if context["decision"] == "ALLOW":
+        parse_allow_response(code, body, case_name)
         delta = wait_for_metric(aws, start, 1, samples)
         if delta != 1:
-            raise Blocked("dev backend delta is not exactly one")
+            raise Blocked("Gateway ALLOW backend delta is not exactly one")
     else:
-        parse_prod_response(code, body)
-        minimum_observation = datetime.now(timezone.utc) + timedelta(seconds=120)
+        parse_deny_response(code, body, case_name)
+        minimum_observation = datetime.now(timezone.utc) + timedelta(seconds=deny_observation_seconds)
         if datetime.now(timezone.utc) < minimum_observation:
             time.sleep((minimum_observation - datetime.now(timezone.utc)).total_seconds())
         delta = wait_for_metric(aws, start, 0, samples, stable_samples=2)
         if delta != 0:
-            raise Blocked("prod backend delta is not exactly zero")
+            raise Blocked("Gateway DENY backend delta is not exactly zero")
     evidence = {
-        "environment": environment,
+        "case": case_name,
+        "context": {key: context[key] for key in ("environment", "action", "target")},
         "proof_started": start.isoformat(),
         "proof_finished": datetime.now(timezone.utc).isoformat(),
         "backend_delta": delta,
         "metric_samples": samples,
         "response": json.loads(body),
     }
-    write_private_json(aws.private_dir / f"visual-{environment}-evidence.json", evidence)
+    write_private_json(aws.private_dir / f"visual-{case_name}-evidence.json", evidence)
     return evidence
 
 
-def verify_retained_action(environment):
+def verify_retained_action(case_name):
     """Verify one existing Gateway decision without any create or repair path.
 
     This is the narrow bridge used by the governed local demo action. It calls
@@ -734,21 +935,23 @@ def verify_retained_action(environment):
     does not wait for or interpret Lambda metrics; the full proof owns that
     execution-count evidence.
     """
-    validate_case(TOOL_NAME, environment)
+    validate_case(TOOL_NAME, case_name)
+    context = case_context(case_name)
     aws, gateway, cost = retained_live_context()
-    code, body = invoke_gateway(aws, gateway["gatewayUrl"], environment)
-    if environment == "dev":
-        parse_dev_response(code, body)
+    code, body = invoke_gateway(aws, gateway["gatewayUrl"], case_name)
+    if context["decision"] == "ALLOW":
+        parse_allow_response(code, body, case_name)
         decision = "ALLOW"
     else:
-        parse_prod_response(code, body)
+        parse_deny_response(code, body, case_name)
         decision = "DENY"
     result = {
-        "environment": environment,
+        "case": case_name,
+        "context": {key: context[key] for key in ("environment", "action", "target")},
         "decision": decision,
         "retained_cost_gate": "PASS" if validate_cost(cost) < COST_LIMIT else "BLOCKED",
     }
-    write_private_json(aws.private_dir / f"m1-gateway-{environment}.json", result)
+    write_private_json(aws.private_dir / f"m9-gateway-{case_name}.json", result)
     return result
 
 
@@ -909,7 +1112,7 @@ def plan():
     print(f"TOOL={TOOL_NAME}")
     print(f"NATIVE_AGENTCORE_CLI={CLI_VERSION}")
     print(f"MCP_PROTOCOL_VERSION={MCP_VERSION}")
-    print("PLAN=converge native stack; one dev ALLOW; one prod DENY; verify retention")
+    print("PLAN=converge native stack; one exact tuple ALLOW; three bounded tuple DENYs; verify retention")
     print("PRECREATE_ESTIMATED_MONTHLY_IDLE_COST_USD=1.01")
     print("AWS_CALLS=0")
 
@@ -953,15 +1156,17 @@ def prepare_live():
 def prove_live(converge=False):
     private_dir, aws, identity = live_context()
     lambda_arn = ensure_lambda_prerequisite(aws, identity)
-    project = (converge_native(private_dir, lambda_arn, identity) if converge
+    project = (converge_native(private_dir, aws, lambda_arn, identity) if converge
                else private_dir / "Issue31Policy" / "agentcore")
     gateway, _ = inventory_and_cost(aws, project, lambda_arn, identity)
     evidence = prove_deltas(aws, gateway)
     _, cost = inventory_and_cost(aws, project, lambda_arn, identity)
-    print("DEV_DECISION=ALLOW")
-    print(f"DEV_BACKEND_CALLS={evidence['dev_backend_delta']}")
-    print("PROD_DECISION=DENY")
-    print(f"PROD_BACKEND_DELTA={evidence['prod_backend_delta']}")
+    print("EXACT_TUPLE_DECISION=ALLOW")
+    print(f"ALLOW_BACKEND_CALLS={evidence['allow_backend_delta']}")
+    print("WRONG_ACTION_DECISION=DENY")
+    print("WRONG_TARGET_DECISION=DENY")
+    print("SYNTHETIC_PROD_DECISION=DENY")
+    print(f"DENY_BACKEND_DELTA={evidence['deny_backend_delta']}")
     print("RESOURCE_RETENTION=PASS")
     print(f"ESTIMATED_MONTHLY_IDLE_COST_USD={cost:.2f}")
     print("GATEWAY_POLICY_RESULT=PASS")
@@ -975,12 +1180,12 @@ def main():
                         help="prove the already-deployed retained stack")
     parser.add_argument("--approve-live", action="store_true",
                         help="converge the native stack and run the complete live proof")
-    parser.add_argument("--verify-retained-action", choices=("dev", "prod"),
-                        help="verify one retained Gateway decision without resource mutation")
+    parser.add_argument("--verify-retained-tuple", choices=tuple(GATEWAY_CASES),
+                        help="verify one fixed retained Gateway tuple without resource mutation")
     args = parser.parse_args()
     try:
         if sum((args.prepare_live, args.prove_live, args.approve_live,
-                bool(args.verify_retained_action))) > 1:
+                bool(args.verify_retained_tuple))) > 1:
             raise Blocked("select one live mode")
         if args.prepare_live:
             prepare_live()
@@ -988,8 +1193,8 @@ def main():
             prove_live()
         elif args.approve_live:
             prove_live(converge=True)
-        elif args.verify_retained_action:
-            result = verify_retained_action(args.verify_retained_action)
+        elif args.verify_retained_tuple:
+            result = verify_retained_action(args.verify_retained_tuple)
             print(f"GATEWAY_DECISION={result['decision']}")
             print(f"RETAINED_COST_GATE={result['retained_cost_gate']}")
             print("GATEWAY_ACTION_VERIFIED=PASS")

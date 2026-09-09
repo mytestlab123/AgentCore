@@ -42,7 +42,7 @@ endpoints:
       deny:
         - mcp:agentcore_governance:delete_demo_asset
         - delete_demo_asset_mcp_agentcore_governance
-      reason: "ASK - Review {tool}. The parameters below target one fixed unattached demo Security Group: blank ticket is valid in dev. Reject = no MCP call and no AWS change. Approve checks the retained AgentCore Gateway first; only Gateway ALLOW revokes exact TCP/22 from 0.0.0.0/0 and verifies COMPLIANT. No generic AWS mutation or secret access."
+      reason: "ASK - Review {tool}. Fixed server-owned context: environment=dev, action=remove_unrestricted_ssh, target=demo-security-group. Blank ticket is valid in dev. Reject = no MCP call and no AWS change. Approve checks the retained AgentCore Gateway first; only Gateway ALLOW may revoke exact TCP/22 from 0.0.0.0/0 and verifies COMPLIANT. No generic AWS mutation or secret access."
       hooks:
         - matcher: mcp:agentcore_governance:apply_demo_remediation
           module: /absolute/path/to/AgentCore/integration/librechat-governance/approval-hook.cjs
