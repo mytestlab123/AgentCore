@@ -45,37 +45,27 @@ AWS Config's managed `restricted-ssh` rule uses the same logic: port 22 open fro
 
 ## Operator-only reset
 
-Run this only after a successful demonstration has verified `COMPLIANT`. It
-finds the one named fixed demo Group in the approved `amit` account, refuses to
-continue if the Group is attached to an ENI, and restores only the one
-intentional non-compliant rule. It does not create, attach, delete, or modify
-any other resource. It is not a LibreChat or MCP capability.
+Run this only after a successful demonstration has verified `COMPLIANT`.
+`scripts/rearm-demo-security-state.sh` is the one operator command for the
+complete current AWS-backed demo-resource set. Today that set contains one
+named fixed demo Group. The script refuses to continue if it is attached to an
+ENI and restores only the one intentional non-compliant TCP/22 rule. It does
+not create, attach, delete, or modify any other resource. It is not a
+LibreChat or MCP capability.
 
 ```bash
-set -euo pipefail
-export AWS_PROFILE=amit AWS_REGION=ap-southeast-1 AWS_PAGER=''
-aws sts get-caller-identity --output json >/dev/null
+AWS_PROFILE=amit AWS_REGION=ap-southeast-1 \
+  ./scripts/rearm-demo-security-state.sh --check
 
-DEMO_SG_ID="$(aws ec2 describe-security-groups \
-  --filters Name=group-name,Values=AgentCoreIssue46RestrictedSshDemo \
-  --query 'SecurityGroups[].GroupId' --output text --no-cli-pager)"
-[[ "$DEMO_SG_ID" =~ ^sg-[0-9a-f]{8}([0-9a-f]{9})?$ ]]
-[[ "$(aws ec2 describe-network-interfaces --filters Name=group-id,Values="$DEMO_SG_ID" \
-  --query 'length(NetworkInterfaces)' --output text --no-cli-pager)" == 0 ]]
-
-if ! aws ec2 describe-security-groups --group-ids "$DEMO_SG_ID" \
-  --query 'SecurityGroups[0].IpPermissions[?IpProtocol==`tcp` && FromPort==`22` && ToPort==`22`].IpRanges[].CidrIp' \
-  --output text --no-cli-pager | grep -qx '0.0.0.0/0'; then
-  aws ec2 authorize-security-group-ingress --group-id "$DEMO_SG_ID" \
-    --ip-permissions '[{"IpProtocol":"tcp","FromPort":22,"ToPort":22,"IpRanges":[{"CidrIp":"0.0.0.0/0"}]}]' \
-    --no-cli-pager
-fi
-
-aws ec2 describe-security-groups --group-ids "$DEMO_SG_ID" \
-  --query 'SecurityGroups[0].IpPermissions[?IpProtocol==`tcp` && FromPort==`22` && ToPort==`22`].IpRanges[].CidrIp' \
-  --output text --no-cli-pager | grep -qx '0.0.0.0/0'
+AWS_PROFILE=amit AWS_REGION=ap-southeast-1 \
+  ./scripts/rearm-demo-security-state.sh --approve-rearm
 ```
 
 The command should return only after the Group is again `NON_COMPLIANT` for
 unrestricted SSH. Re-run the read-only `check_security_finding` tool to show
 the restored state; do not use the reset command from LibreChat.
+
+If a later approved milestone adds another AWS-backed demo resource, extend
+this one script with that exact resource's identity and attachment/scope gates.
+Do not replace it with generic account-wide discovery or a “make all resources
+non-compliant” action.

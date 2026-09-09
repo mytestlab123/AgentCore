@@ -412,8 +412,9 @@ The implementation contract and native configuration example are in:
 
 After a successful approved demo, only the operator may restore the intentional
 unrestricted SSH rule for the next run. The exact direct AWS CLI reset shape is
-in `docs/ISSUE46_REAL_AWS_SECURITY_SIGNAL.md`. It is not a LibreChat tool and
-must use the private ID of the fixed unattached demo Security Group.
+`./scripts/rearm-demo-security-state.sh --approve-rearm`; the read-only status
+command is `--check`. It is not a LibreChat tool and refuses an attached or
+ambiguous demo Security Group.
 - `docs/ISSUE24_GOVERNANCE_PROOF.md`
 
 Run the offline regression proof from the repository root:
