@@ -16,7 +16,13 @@ Purpose: complete M9–M13 as one cohesive governance milestone on top of merged
 
 ## Current provider state
 
-The dedicated demo Security Group was left **COMPLIANT** after the final M8 native UI proof. Do not silently recreate the bad rule. The operator-only direct AWS CLI reset remains the only intentional way to restore the NON_COMPLIANT demo state.
+The M13 application behavior remains fail-safe: if unrestricted SSH is absent,
+an approved request returns `NO_REMEDIATION_REQUIRED` and performs no AWS
+mutation. After the M9–M13 proof, the operator intentionally re-armed the
+dedicated, unattached demo Security Group with its one TCP/22-from-`0.0.0.0/0`
+rule so the next demonstration starts `NON_COMPLIANT` and can exercise the
+real exact revoke. This reset is operator-only direct AWS CLI work; it is never
+performed by LibreChat, the MCP server, or an automatic cleanup job.
 
 ## KISS
 

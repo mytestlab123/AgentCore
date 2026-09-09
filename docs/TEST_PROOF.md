@@ -4,10 +4,13 @@ Last verified: 9 September 2026, 09:41 SGT
 
 ## Issue #48 exact remediation tuple — retained Gateway and live-host proof
 
-The current dedicated demo Security Group is **COMPLIANT**. It is deliberately
-not reset to non-compliant state after a proof. The deployed MCP implementation
-therefore returns a truthful no-op for an approved `dev` remediation: it does
-not recreate TCP/22 ingress and does not call the revoke API.
+The M9–M13 live proof left the dedicated demo Security Group **COMPLIANT** and
+proved the truthful no-op branch. After that proof, Amit explicitly re-armed
+the detached demo Group through the documented operator-only AWS CLI command
+for the next presentation: it now has only TCP/22 from `0.0.0.0/0` and zero ENI
+attachments, so it is intentionally **NON_COMPLIANT**. The deployed MCP never
+performs this reset. If the Group is compliant when an approved request runs,
+it still returns the truthful no-op and does not call the revoke API.
 
 The retained AgentCore Gateway and its two policy bindings are active with one
 server-owned context only:
@@ -27,6 +30,7 @@ target=demo-security-group
 | Deployed LibreChat host MCP request | `ALLOW`; provider state `COMPLIANT`; `NO_REMEDIATION_REQUIRED` |
 | Host controlled-action readback | exact AWS revoke `no`; AWS mutation `none` |
 | Deployment health after exact process-tree restart | HTTP `200`; one current Node backend and one current governed MCP child |
+| Current next-demo state | intentionally `NON_COMPLIANT`; only TCP/22 from `0.0.0.0/0`; ENI attachments `0` |
 
 The direct Gateway proof calls the retained Gateway with only the four fixed
 test tuples. Its bounded backend metric establishes one execution for the
