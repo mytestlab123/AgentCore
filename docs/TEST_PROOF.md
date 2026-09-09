@@ -1,6 +1,6 @@
 # AgentCore Test Proof
 
-Last verified: 9 September 2026, 09:28 SGT
+Last verified: 9 September 2026, 09:41 SGT
 
 ## Issue #48 exact remediation tuple — retained Gateway and live-host proof
 
@@ -26,7 +26,7 @@ target=demo-security-group
 | Synthetic `prod` environment | `DENY`; backend metric delta `0` |
 | Deployed LibreChat host MCP request | `ALLOW`; provider state `COMPLIANT`; `NO_REMEDIATION_REQUIRED` |
 | Host controlled-action readback | exact AWS revoke `no`; AWS mutation `none` |
-| Deployment health after controlled restart | HTTP `200` |
+| Deployment health after exact process-tree restart | HTTP `200`; one current Node backend and one current governed MCP child |
 
 The direct Gateway proof calls the retained Gateway with only the four fixed
 test tuples. Its bounded backend metric establishes one execution for the
@@ -34,6 +34,11 @@ allowed tuple and no execution for every denied tuple. The live host proof
 starts the deployed MCP server with the EC2 instance role and a temporary,
 private state directory. It is a backend/MCP proof, not an authenticated
 LibreChat-browser click proof.
+
+The first host restart had stopped only a detached `npm` wrapper and left the
+old Node/MCP children serving requests. A later exact process-tree restart
+replaced both children and repeated the passing host-MCP proof. HTTP health
+alone is therefore not treated as evidence of a configuration reload.
 
 The visible native approval card still requires Amit's authenticated browser.
 For the current compliant state, **Approve** + **Submit** must show:

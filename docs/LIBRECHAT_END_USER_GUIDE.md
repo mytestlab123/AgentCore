@@ -223,10 +223,13 @@ Expected behavior:
 
 - LibreChat shows the native approval prompt again.
 - Choose **Approve**.
-- The MCP response begins `ASK / APPROVE / ALLOW - AWS remediation verified`.
-- It reports one MCP call, Gateway **ALLOW**, revocation of only TCP/22 from
-  `0.0.0.0/0` on the fixed demo Group, and immediate `COMPLIANT` provider
-  verification.
+- The MCP response begins either `ASK / APPROVE / ALLOW - AWS remediation
+  verified` or, when the retained Group is already compliant,
+  `ASK / APPROVE / ALLOW - NO_REMEDIATION_REQUIRED`.
+- It reports one MCP call and Gateway **ALLOW**. A non-compliant Group may
+  have only TCP/22 from `0.0.0.0/0` revoked before immediate `COMPLIANT`
+  provider verification. A compliant Group is a no-op: its result says
+  `Exact AWS revoke called: no` and `AWS or infrastructure mutation: none`.
 - It must also say that no ENI, instance, route, public IP, workload, or secret
   changed.
 - Under the result, read the **Compact audit** in this order: request, tool,
@@ -308,7 +311,7 @@ the retained Gateway still denies the `prod` request as described above.
 | `ALLOW` | Read-only operation is pre-approved | Tool runs immediately |
 | `ASK` | Operation needs a human decision | Native approval prompt appears |
 | `ASK / Reject` | Human refused the request | Tool does not run |
-| `ASK / Approve` | Human approved the request | One exact demo-only SSH rule revoke, then provider verification |
+| `ASK / Approve` | Human approved the request | Provider verification; exact revoke only when the fixed Group is non-compliant |
 | `DENY` | Operation is prohibited | Tool is blocked before execution |
 
 The model does not receive AWS credentials and cannot choose a shell command,
@@ -331,8 +334,9 @@ request -> tool -> human decision -> Gateway decision -> backend -> final result
 - A native **Reject** has no MCP result because the server is intentionally not
   called. The LibreChat `Cancelled` approval card is the evidence; no AWS
   action is made.
-- A `dev` **Approve** result shows Gateway `ALLOW`, the one exact fixed-rule
-  revoke, and provider verification of `COMPLIANT`.
+- A `dev` **Approve** result shows Gateway `ALLOW` and provider verification
+  of `COMPLIANT`. It either reports the one exact fixed-rule revoke or the
+  explicit compliant no-op; the Group is never reset to create a demo result.
 - A submitted `prod` request shows Gateway `DENY` and does not call the exact
   AWS revoke.
 
@@ -352,8 +356,10 @@ ENDPOINTS=custom,agents
 
 After changing the setting:
 
-1. Restart the existing LibreChat backend.
-2. Confirm the site returns HTTP `200`.
+1. Restart the actual LibreChat Node backend and its governed MCP child, not
+   only a detached `npm` wrapper process.
+2. Confirm the site returns HTTP `200` and the fresh Node backend has exactly
+   one fresh `demo_mcp_server.py` child.
 3. Sign out and sign in again.
 4. Press `Ctrl+F5`.
 5. Open the top endpoint pill and select **Agents**.
