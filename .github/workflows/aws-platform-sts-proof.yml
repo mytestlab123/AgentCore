@@ -1,0 +1,46 @@
+name: AWS Platform STS Proof
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  sts-proof:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: personal-lab
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      AWS_ACCOUNT_ALIAS: ${{ vars.AWS_ACCOUNT_ALIAS }}
+    steps:
+      - name: Validate expected context
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${GITHUB_REF}" = "refs/heads/main"
+          test "${AWS_REGION}" = "ap-southeast-1"
+          test "${AWS_ACCOUNT_ALIAS}" = "personal-lab"
+          echo "CONTEXT_GUARD=PASS"
+
+      - name: Configure trust-only AWS identity
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_PROOF_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          allowed-account-ids: ${{ secrets.AWS_ALLOWED_ACCOUNT_ID }}
+
+      - name: Prove STS identity without disclosing identifiers
+        shell: bash
+        env:
+          AWS_ALLOWED_ACCOUNT_ID: ${{ secrets.AWS_ALLOWED_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          actual_account="$(aws sts get-caller-identity --query Account --output text)"
+          test "${actual_account}" = "${AWS_ALLOWED_ACCOUNT_ID}"
+          echo "OIDC_STS_PROOF=PASS"
+          echo "AWS_ACCOUNT_ALIAS=${AWS_ACCOUNT_ALIAS}"
+          echo "AWS_REGION=${AWS_REGION}"
+          echo "WORKLOAD_MUTATION=NONE"
