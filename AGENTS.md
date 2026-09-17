@@ -5,23 +5,21 @@
 Build a small, understandable internal AI platform POC following `ROADMAP.md`.
 Follow KISS and optimize for a 3-5 minute demo.
 
-The active implementation milestone is Issue #46: complete one real AWS
-Security Group governance lifecycle while reusing the merged M1-M7 platform
-and demo path.
+Current milestone/status belongs in `CONTEXT.md` and the owning Issue/PR, not in this stable file. For warm continuation, use the named Issue/PR, latest relevant authorized delta, and current HEAD. Reload broader guidance only for cold start/recovery, changed governing files, ambiguity, or stale/unsafe context.
 
 ## Scope
 
 - Keep local simulation usable without AWS.
 - Reuse the existing Project/Home, Playground, Logs, LibreChat, Gateway, Harness
   and validation paths before adding another framework.
-- Reuse the merged M1-M7 governed workflow and final demo rather than rebuilding
+- Reuse the merged governed workflow and demo path rather than rebuilding
   approval, Gateway Policy, audit, developer-client, or controlled-action plumbing.
-- Issue #46 uses one fixed, dedicated, unattached demo Security Group. It may
-  read that Group and, only after native approval plus Gateway ALLOW, revoke
-  the single exact TCP/22-from-0.0.0.0/0 ingress rule and verify the result.
+- A dedicated demo Security Group path may read that fixed demo resource and,
+  only when the active owning Issue explicitly authorizes it, use the existing
+  native approval + Gateway Policy flow for one exact bounded remediation.
 - Do not turn this into a generic Security Group mutation capability, accept a
-  caller-selected resource/rule, or change any instance, ENI, route, public IP,
-  or workload.
+  caller-selected resource/rule, or change unrelated instance, ENI, route,
+  public IP, or workload state.
 - An active Amit-approved Issue, PR, goal, task, or milestone authorizes the
   normal scoped AWS, IAM, configuration, deployment, service-restart, and
   validation changes needed to complete it. Do not request a second approval
